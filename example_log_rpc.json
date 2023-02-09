@@ -1,0 +1,53 @@
+[
+    Log {
+        address: 0x4fabb145d64652a948d72533023f6e7a623c7c53,
+        topics: [0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef, 0x00000000000000000000000060c5a745921587c6739cd878fd8cf3429da23020, 0x0000000000000000000000004ff7e1e713e30b0d1fb9cd00477cef399ff9d493],
+        data: Bytes([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 4, 144, 67, 171, 80, 44, 0, 0]),
+        block_hash: Some(0x30d333abf5028f2ca2b4a9f37d756ecdd79b2a19e957114d1d08ded9390710e4),
+        block_number: Some(15647510),
+        transaction_hash: Some(0x860acb2aaf0b962665b7963f5af828d4534645c4c27112eeccc923631cc1f8c9),
+        transaction_index: Some(173),
+        log_index: Some(397),
+        transaction_log_index: None,
+        log_type: None,
+        removed: Some(false) 
+    },
+    Log {
+        address: 0x4fabb145d64652a948d72533023f6e7a623c7c53, 
+        topics: [0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef, 0x000000000000000000000000a9d1e08c7793af67e9d92fe308d5697fb81d3e43, 0x00000000000000000000000046c56c9b8af2b403dfd13f92dce21538376956a2],
+        data: Bytes([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 29, 252, 221, 233, 123, 73, 102, 40, 0]), block_hash: Some(0x9ab2fb62051b99d32099fa9494d5f4cbc4cf1f6b9ff86262ca24d5263e575158),
+        block_number: Some(15647513),
+        transaction_hash: Some(0xcd7174000aca99b9a974688a63719046042e26bc8ac37b392f4bf7910171faaa),
+        transaction_index: Some(94),
+        log_index: Some(217),
+        transaction_log_index: None,
+        log_type: None,
+        removed: Some(false)
+    },
+    Log {
+        address: 0x4fabb145d64652a948d72533023f6e7a623c7c53,
+        topics: [0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef, 0x00000000000000000000000009cb2635b9d78101e598c358b5529ae8d1af85b5, 0x000000000000000000000000907a9d9c13069d2e97fc0b2d5e58eae781fde4c5],
+        data: Bytes([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 163, 2, 130, 8, 59, 47, 156, 0, 0]),
+        block_hash: Some(0xb2c7a5050e907cfce0e87a5c146c018e0c82420a2e9a9d5ce1030f700b971eb7),
+        block_number: Some(15647515),
+        transaction_hash: Some(0xf0633a5fae078d6cbbe38e5851a6fe29ed6882eaecdbf1e0b4ada80f53dcbf16),
+        transaction_index: Some(169),
+        log_index: Some(266),
+        transaction_log_index: None,
+        log_type: None,
+        removed: Some(false)
+    }, 
+    Log {
+        address: 0x4fabb145d64652a948d72533023f6e7a623c7c53,
+        topics: [0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef, 0x0000000000000000000000003cb93375c64558e5ff5f8e1d9a1a12a7bd82ea16, 0x0000000000000000000000001656d59fbd6200311cc62c666988809a7a5203e7],
+        data: Bytes([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30, 117, 83, 28, 136, 32, 45, 40, 136]),
+        block_hash: Some(0xb2c7a5050e907cfce0e87a5c146c018e0c82420a2e9a9d5ce1030f700b971eb7),
+        block_number: Some(15647515),
+        transaction_hash: Some(0x37eef14dec26bc2a5a2f9b13311cc52db7204c80d34edb84f76224f694d9ae38),
+        transaction_index: Some(242),
+        log_index: Some(483),
+        transaction_log_index: None,
+        log_type: None,
+        removed: Some(false) 
+    }
+]
