@@ -135,7 +135,9 @@ pub async fn transfer(
             };
 
             let amount_to_transfer = amount - fee;
-            let business_fee_amount = (amount_to_transfer / 100) * business_fee;
+            let business_fee_amount: u256 = amount_to_transfer;
+            let business_fee_amount = business_fee_amount * business_fee.into() / 100;
+            let business_fee_amount: u128 = business_fee_amount.into();
 
             let fee_counter = scanner_state.get_fee_counter().await;
 
