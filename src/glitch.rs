@@ -22,6 +22,7 @@ use web3::block_on;
 
 use crate::database::ScannerState;
 use crate::js_call::{self, get_fee};
+use substrate_api_client::sp_runtime::app_crypto::sp_core::U256;
 
 // MEJORAS GLITCH:
 
@@ -135,9 +136,7 @@ pub async fn transfer(
             };
 
             let amount_to_transfer = amount - fee;
-            let business_fee_amount: u256 = amount_to_transfer;
-            let business_fee_amount = business_fee_amount * business_fee.into() / 100;
-            let business_fee_amount: u128 = business_fee_amount.into();
+            let business_fee_amount = (U256::from(amount_to_transfer) * U256::from(business_fee) / 100).as_u128();
 
             let fee_counter = scanner_state.get_fee_counter().await;
 
