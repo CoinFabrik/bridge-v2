@@ -1874,6 +1874,7 @@ name = "glitch-bridge"
 version = "0.1.0"
 dependencies = [
  "base58",
+ "chrono",
  "clap",
  "dialoguer",
  "env_logger",

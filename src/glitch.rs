@@ -1,6 +1,8 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
+use chrono::NaiveDateTime;
+use chrono::Utc;
 use hex::decode;
 use kitchensink_runtime::Runtime;
 use log::info;
@@ -17,6 +19,7 @@ use substrate_api_client::{
 };
 use substrate_api_client::{Api, XtStatus};
 use tokio::task::spawn_blocking;
+use tokio::time::Instant;
 use tokio::time::{sleep, Duration};
 use web3::block_on;
 
@@ -30,6 +33,16 @@ use substrate_api_client::sp_runtime::app_crypto::sp_core::U256;
 // - ESTADO INTERMEDIO
 // - FLOTANTE PARA EL FEE
 
+async fn is_time_to_pay_fee(scanner_state: &ScannerState, interval_in_days: i64) -> bool {
+    let last_day_payment = NaiveDateTime::parse_from_str(
+        scanner_state.get_fee_last_time().await.as_str(),
+        "%Y-%m-%d %H:%M:%S",
+    )
+    .unwrap();
+
+    Utc::now().timestamp() - last_day_payment.timestamp() >= (interval_in_days * 86000)
+}
+
 pub async fn fee_payer(
     scanner_state: ScannerState,
     interval_in_days: u8,
@@ -37,51 +50,52 @@ pub async fn fee_payer(
     fee_address: String,
 ) {
     loop {
-        sleep(Duration::from_secs(u64::from(interval_in_days) * 86400)).await;
+        sleep(Duration::from_secs(60)).await;
+        if is_time_to_pay_fee(&scanner_state, interval_in_days as i64).await {
+            let fee_to_send = scanner_state.get_fee_counter().await;
 
-        let fee_to_send = scanner_state.get_fee_counter().await;
+            if fee_to_send != 0 {
+                scanner_state.modify_fee_counter(0).await;
 
-        if fee_to_send != 0 {
-            scanner_state.modify_fee_counter(0).await;
+                // Transfer
+                let seed: [u8; 32] = decode(glitch_pk.as_ref().unwrap())
+                    .unwrap()
+                    .try_into()
+                    .unwrap();
 
-            // Transfer
-            let seed: [u8; 32] = decode(glitch_pk.as_ref().unwrap())
-                .unwrap()
-                .try_into()
-                .unwrap();
+                let pair = Pair::from_seed(&seed);
 
-            let pair = Pair::from_seed(&seed);
+                let client = WsRpcClient::new("ws://13.212.108.116:9944").unwrap();
+                let mut api =
+                    Api::<_, _, AssetTipExtrinsicParams<Runtime>, Runtime>::new(client).unwrap();
+                api.set_signer(pair);
 
-            let client = WsRpcClient::new("ws://13.212.108.116:9944").unwrap();
-            let mut api =
-                Api::<_, _, AssetTipExtrinsicParams<Runtime>, Runtime>::new(client).unwrap();
-            api.set_signer(pair);
+                let account_id = AccountId::from(Public::from_str(fee_address.as_str()).unwrap());
 
-            let account_id = AccountId::from(Public::from_str(fee_address.as_str()).unwrap());
+                let xt = api.balance_transfer(GenericAddress::Id(account_id), fee_to_send);
 
-            let xt = api.balance_transfer(GenericAddress::Id(account_id), fee_to_send);
+                let xt_result =
+                    api.submit_and_watch_extrinsic_until(Encode::encode(&xt), XtStatus::Finalized);
 
-            let xt_result =
-                api.submit_and_watch_extrinsic_until(Encode::encode(&xt), XtStatus::Finalized);
-
-            match xt_result {
-                Ok(extrinsic_report) => {
-                    scanner_state
-                        .insert_tx_fee(
-                            format!("{:#x}", extrinsic_report.extrinsic_hash),
-                            fee_to_send.to_string(),
-                        )
-                        .await;
-                    info!(
-                        "The transfer of the business fee ({}) has been completed",
-                        fee_to_send
-                    );
-                }
-                Err(e) => {
-                    info!(
+                match xt_result {
+                    Ok(extrinsic_report) => {
+                        scanner_state
+                            .insert_tx_fee(
+                                format!("{:#x}", extrinsic_report.extrinsic_hash),
+                                fee_to_send.to_string(),
+                            )
+                            .await;
+                        info!(
+                            "The transfer of the business fee ({}) has been completed",
+                            fee_to_send
+                        );
+                    }
+                    Err(e) => {
+                        info!(
                         "Transfer of the business fee not completed. It will be tried again.: {}",
                         e
                     );
+                    }
                 }
             }
         }
@@ -136,7 +150,8 @@ pub async fn transfer(
             };
 
             let amount_to_transfer = amount - fee;
-            let business_fee_amount = (U256::from(amount_to_transfer) * U256::from(business_fee) / 100).as_u128();
+            let business_fee_amount =
+                (U256::from(amount_to_transfer) * U256::from(business_fee) / 100).as_u128();
 
             let fee_counter = scanner_state.get_fee_counter().await;
 

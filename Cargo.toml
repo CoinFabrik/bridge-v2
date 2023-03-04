@@ -28,6 +28,7 @@ kitchensink-runtime = { git = "https://github.com/paritytech/substrate.git", bra
 hex-literal = "0.3.4"
 hex = "0.4.3"
 base58 = "0.2.0"
+chrono = "0.4.0"
 
 [dependencies.syn]
 version = "=1.0.107"
