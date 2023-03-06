@@ -1,7 +1,7 @@
 use log::{debug, error};
 use mysql_async::prelude::{BatchQuery, Queryable, WithParams};
 use mysql_async::{params, Conn, Pool, Row};
-use substrate_api_client::sp_runtime::app_crypto::sp_core::U256;
+use sp_core::U256;
 use web3::types::{Log, H160, H256};
 
 use crate::config::Db;
