@@ -1,5 +1,4 @@
 use std::str::FromStr;
-use std::sync::Arc;
 
 use chrono::NaiveDateTime;
 use chrono::Utc;
@@ -7,11 +6,13 @@ use log::error;
 use log::info;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::json;
 use sp_core::crypto::Pair;
 use sp_core::sr25519;
 use sp_core::sr25519::Public;
 use sp_core::U256;
 use substrate_api_client::BaseExtrinsicParams;
+use substrate_api_client::PlainTip;
 use substrate_api_client::PlainTipExtrinsicParams;
 use substrate_api_client::{rpc::WsRpcClient, AccountId, GenericAddress, MultiAddress};
 use substrate_api_client::{Api, XtStatus};
@@ -20,7 +21,7 @@ use tokio::time::{sleep, Duration};
 use web3::block_on;
 
 use crate::database::ScannerState;
-use crate::js_call::{self, get_fee};
+use crate::database::TxToProcess;
 
 // MEJORAS GLITCH:
 
@@ -53,13 +54,6 @@ pub async fn fee_payer(
                 scanner_state.modify_fee_counter(0).await;
 
                 // Transfer
-                /*let seed: [u8; 32] = decode(glitch_pk.as_ref().unwrap())
-                    .unwrap()
-                    .try_into()
-                    .unwrap();
-
-                let pair = Pair::from_seed(&seed);*/
-
                 let signer: sr25519::Pair =
                     Pair::from_string(glitch_pk.as_ref().unwrap(), None).unwrap();
 
@@ -99,6 +93,51 @@ pub async fn fee_payer(
     }
 }
 
+async fn calculate_amount_to_transfer_and_business_fee(
+    api: &Api<sr25519::Pair, WsRpcClient, BaseExtrinsicParams<PlainTip>>,
+    glitch_gas: bool,
+    amount: u128,
+    tx: &TxToProcess,
+    scanner_state: &ScannerState,
+    business_fee: u128,
+    public: Public,
+) -> (u128, u128) {
+    let xt_to_send = api
+        .balance_transfer(MultiAddress::Id(AccountId::from(public)), amount)
+        .hex_encode();
+    let fee = if glitch_gas {
+        get_fee_request(&api, xt_to_send)
+            .unwrap()
+            .parse::<u128>()
+            .unwrap()
+    } else {
+        0_u128
+    };
+
+    let amount_to_transfer = amount - fee;
+    let business_fee_amount =
+        (U256::from(amount_to_transfer) * U256::from(business_fee) / 100).as_u128();
+
+    let fee_counter = scanner_state.get_fee_counter().await;
+
+    scanner_state
+        .modify_fee_counter(fee_counter + business_fee_amount)
+        .await;
+
+    info!("Business fee amount is: {}", business_fee_amount);
+
+    info!("Amount received in the ETH transaction: {}", amount);
+    info!(
+        "Estimated fee for the transaction on the Glitch network {}",
+        fee
+    );
+    info!("Amount to be transferred {}", amount_to_transfer);
+
+    scanner_state.update_tx_to_processing(tx.id).await;
+
+    return (amount_to_transfer, business_fee_amount);
+}
+
 pub async fn transfer(
     scanner_state: ScannerState,
     glitch_pk: Option<String>,
@@ -107,8 +146,11 @@ pub async fn transfer(
     glitch_gas: bool,
 ) {
     let client = WsRpcClient::new(&node_glitch);
+    let signer: sr25519::Pair = Pair::from_string(glitch_pk.as_ref().unwrap(), None).unwrap();
     let api: Api<sr25519::Pair, WsRpcClient, BaseExtrinsicParams<_>> =
-        Api::<_, _, PlainTipExtrinsicParams>::new(client).unwrap();
+        Api::<_, _, PlainTipExtrinsicParams>::new(client)
+            .map(|api| api.set_signer(signer))
+            .unwrap();
 
     loop {
         let txs = scanner_state.txs_to_process().await;
@@ -134,38 +176,18 @@ pub async fn transfer(
                 }
             };
 
-            let fee = if glitch_gas {
-                get_fee(amount, &tx.glitch_address)
-            } else {
-                0_u128
-            };
-
-            let amount_to_transfer = amount - fee;
-            let business_fee_amount =
-                (U256::from(amount_to_transfer) * U256::from(business_fee) / 100).as_u128();
-
-            let fee_counter = scanner_state.get_fee_counter().await;
-
-            scanner_state
-                .modify_fee_counter(fee_counter + business_fee_amount)
+            let (amount_to_transfer, business_fee_amount) =
+                calculate_amount_to_transfer_and_business_fee(
+                    &api,
+                    glitch_gas,
+                    amount,
+                    &tx,
+                    &scanner_state,
+                    business_fee,
+                    public,
+                )
                 .await;
-
-            info!("Business fee amount is: {}", business_fee_amount);
-
-            info!("Amount received in the ETH transaction: {}", amount);
-            info!(
-                "Estimated fee for the transaction on the Glitch network {}",
-                fee
-            );
-            info!("Amount to be transferred {}", amount_to_transfer);
-
-            scanner_state.update_tx_to_processing(tx.id).await;
             let scanner_state_clone = scanner_state.clone();
-
-            /*let xt_to_send = api.balance_transfer(
-                MultiAddress::Id(AccountId::from(public)),
-                amount_to_transfer - business_fee_amount,
-            );*/
 
             let signer_per_tx: sr25519::Pair =
                 Pair::from_string(glitch_pk.as_ref().unwrap(), None).unwrap();
@@ -207,11 +229,6 @@ pub async fn transfer(
                             tx.glitch_address
                         ),
                     };
-
-                    /*let tx_hash = js_call::transfer(
-                        amount_to_transfer - business_fee_amount,
-                        &tx.glitch_address,
-                    );*/
                 });
             });
         }
@@ -226,4 +243,22 @@ pub struct FeeResult {
     pub class: String,
     pub partial_fee: String,
     pub weight: u128,
+}
+
+fn get_fee_request(
+    api: &Api<sr25519::Pair, WsRpcClient, BaseExtrinsicParams<PlainTip>>,
+    xt_hex: String,
+) -> Option<String> {
+    let request = json!({
+        "method": "payment_queryInfo",
+        "params": vec![xt_hex],
+        "jsonrpc": "2.0",
+        "id": "1",
+    });
+
+    let result = api.get_request(request).unwrap()?;
+
+    let result_parsed: FeeResult = serde_json::from_str(&result).unwrap();
+
+    Some(result_parsed.partial_fee)
 }

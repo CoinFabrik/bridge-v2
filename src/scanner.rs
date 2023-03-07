@@ -4,7 +4,7 @@ use crate::{Config, ScannerState};
 use futures::executor::block_on;
 use log::info;
 use std::sync::Arc;
-use tokio::task::{spawn_blocking, yield_now};
+use tokio::task::spawn_blocking;
 
 pub struct Scanner {
     pub config: Arc<Config>,
