@@ -51,8 +51,6 @@ pub async fn fee_payer(
             let fee_to_send = scanner_state.get_fee_counter().await;
 
             if fee_to_send != 0 {
-                scanner_state.modify_fee_counter(0).await;
-
                 // Transfer
                 let signer: sr25519::Pair =
                     Pair::from_string(glitch_pk.as_ref().unwrap(), None).unwrap();
@@ -76,6 +74,7 @@ pub async fn fee_payer(
 
                 match xt_result {
                     Some(hash) => {
+                        scanner_state.modify_fee_counter(0).await;
                         scanner_state
                             .insert_tx_fee(format!("{:#x}", hash), fee_to_send.to_string())
                             .await;
@@ -85,7 +84,9 @@ pub async fn fee_payer(
                         );
                     }
                     None => {
-                        info!("Transfer of the business fee not completed. It will be tried again.")
+                        info!(
+                            "Transfer of the business fee not completed. It will be tried again."
+                        );
                     }
                 }
             }
@@ -232,7 +233,6 @@ pub async fn transfer(
                 });
             });
         }
-
         sleep(Duration::from_millis(5000)).await;
     }
 }
