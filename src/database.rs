@@ -1,7 +1,7 @@
 use log::{debug, error};
 use mysql_async::prelude::{BatchQuery, Queryable, WithParams};
 use mysql_async::{params, Conn, Pool, Row};
-use substrate_api_client::sp_runtime::app_crypto::sp_core::U256;
+use sp_core::U256;
 use web3::types::{Log, H160, H256};
 
 use crate::config::Db;
@@ -31,6 +31,7 @@ pub struct ScannerState {
     pub network: String,
     pub monitor_address: String,
     pub config: Db,
+    pub connection_pool: Pool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -42,11 +43,21 @@ pub struct TxToProcess {
 
 impl ScannerState {
     pub fn new(name: String, network: String, monitor_address: String, db_config: Db) -> Self {
+        let database_url = format!(
+            "mysql://{}:{}@{}:{}/{}",
+            db_config.username,
+            db_config.password,
+            db_config.host,
+            db_config.port,
+            db_config.database
+        );
+
         Self {
             name,
             network,
             monitor_address,
             config: db_config,
+            connection_pool: Pool::new(database_url.as_str()),
         }
     }
 
@@ -284,18 +295,8 @@ impl ScannerState {
         result
     }
 
-    async fn establish_connection(&self) -> Conn {
-        let database_url = format!(
-            "mysql://{}:{}@{}:{}/{}",
-            self.config.username,
-            self.config.password,
-            self.config.host,
-            self.config.port,
-            self.config.database
-        );
-
-        let pool = Pool::new(database_url.as_str());
-        pool.get_conn().await.unwrap()
+    pub async fn establish_connection(&self) -> Conn {
+        self.connection_pool.get_conn().await.unwrap()
     }
 }
 

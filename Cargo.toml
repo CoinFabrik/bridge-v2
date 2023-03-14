@@ -10,6 +10,9 @@ targets = ['x86_64-unknown-linux-gnu']
 name = 'glitch-bridge'
 
 [dependencies]
+substrate-api-client = {git = "https://github.com/scs/substrate-api-client.git", features = ["ws-client"],  branch = "polkadot-v0.9.26" }
+sp-core = { version = "6.0.0", default-features = false, features = ["full_crypto"], git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.26" }
+sp-keyring = { version = "6.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.26" }
 clap = { version = "3.0", features = ["derive"] }
 serde = "1.0"
 serde_derive = "1.0"
@@ -23,8 +26,6 @@ log4rs = "1.1.0"
 mysql_async = "0.30.0"
 dialoguer = "0.10"
 regex = "1"
-substrate-api-client = {git = "https://github.com/scs/substrate-api-client.git", features = ["tungstenite-client", "ws-client", "staking-xt"],  tag = "v0.9.0" }
-kitchensink-runtime = { git = "https://github.com/paritytech/substrate.git", branch = "master" }
 hex-literal = "0.3.4"
 hex = "0.4.3"
 base58 = "0.2.0"

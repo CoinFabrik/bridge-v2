@@ -1,31 +1,19 @@
+use chrono::{NaiveDateTime, Utc};
+use log::{error, info, warn};
+use sp_core::{crypto::Pair, sr25519, sr25519::Public, U256};
 use std::str::FromStr;
-use std::sync::Arc;
-
-use chrono::NaiveDateTime;
-use chrono::Utc;
-use hex::decode;
-use kitchensink_runtime::Runtime;
-use log::info;
-use serde::Deserialize;
-use serde::Serialize;
-use substrate_api_client::rpc::Request;
-use substrate_api_client::sp_core::Encode;
-use substrate_api_client::sp_runtime::app_crypto::sr25519::Pair;
-use substrate_api_client::sp_runtime::app_crypto::sr25519::Public;
-use substrate_api_client::sp_runtime::app_crypto::Pair as CryptoPair;
-use substrate_api_client::RpcParams;
 use substrate_api_client::{
-    rpc::WsRpcClient, AccountId, AssetTipExtrinsicParams, GenericAddress, SubmitAndWatch,
+    rpc::WsRpcClient, AccountId, Api, BaseExtrinsicParams, GenericAddress, MultiAddress, PlainTip,
+    PlainTipExtrinsicParams, XtStatus,
 };
-use substrate_api_client::{Api, XtStatus};
-use tokio::task::spawn_blocking;
-use tokio::time::Instant;
-use tokio::time::{sleep, Duration};
+use tokio::{
+    task::spawn_blocking,
+    time::{sleep, Duration},
+};
 use web3::block_on;
 
 use crate::database::ScannerState;
-use crate::js_call::{self, get_fee};
-use substrate_api_client::sp_runtime::app_crypto::sp_core::U256;
+use crate::database::TxToProcess;
 
 // MEJORAS GLITCH:
 
@@ -55,51 +43,92 @@ pub async fn fee_payer(
             let fee_to_send = scanner_state.get_fee_counter().await;
 
             if fee_to_send != 0 {
-                scanner_state.modify_fee_counter(0).await;
-
                 // Transfer
-                let seed: [u8; 32] = decode(glitch_pk.as_ref().unwrap())
-                    .unwrap()
-                    .try_into()
+                let signer: sr25519::Pair =
+                    Pair::from_string(glitch_pk.as_ref().unwrap(), None).unwrap();
+
+                let client = WsRpcClient::new("ws://13.212.108.116:9944");
+                let api = Api::<_, _, PlainTipExtrinsicParams>::new(client)
+                    .map(|api| api.set_signer(signer))
                     .unwrap();
-
-                let pair = Pair::from_seed(&seed);
-
-                let client = WsRpcClient::new("ws://13.212.108.116:9944").unwrap();
-                let mut api =
-                    Api::<_, _, AssetTipExtrinsicParams<Runtime>, Runtime>::new(client).unwrap();
-                api.set_signer(pair);
 
                 let account_id = AccountId::from(Public::from_str(fee_address.as_str()).unwrap());
 
                 let xt = api.balance_transfer(GenericAddress::Id(account_id), fee_to_send);
 
-                let xt_result =
-                    api.submit_and_watch_extrinsic_until(Encode::encode(&xt), XtStatus::Finalized);
+                let xt_result = match api.send_extrinsic(xt.hex_encode(), XtStatus::Finalized) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        error!("Transfer error: {:?}", e);
+                        None
+                    }
+                };
 
                 match xt_result {
-                    Ok(extrinsic_report) => {
+                    Some(hash) => {
+                        scanner_state.modify_fee_counter(0).await;
                         scanner_state
-                            .insert_tx_fee(
-                                format!("{:#x}", extrinsic_report.extrinsic_hash),
-                                fee_to_send.to_string(),
-                            )
+                            .insert_tx_fee(format!("{:#x}", hash), fee_to_send.to_string())
                             .await;
                         info!(
                             "The transfer of the business fee ({}) has been completed",
                             fee_to_send
                         );
                     }
-                    Err(e) => {
+                    None => {
                         info!(
-                        "Transfer of the business fee not completed. It will be tried again.: {}",
-                        e
-                    );
+                            "Transfer of the business fee not completed. It will be tried again."
+                        );
                     }
                 }
             }
         }
     }
+}
+
+async fn calculate_amount_to_transfer_and_business_fee(
+    api: &Api<sr25519::Pair, WsRpcClient, BaseExtrinsicParams<PlainTip>>,
+    glitch_gas: bool,
+    amount: u128,
+    tx: &TxToProcess,
+    scanner_state: &ScannerState,
+    business_fee: u128,
+    public: Public,
+) -> (u128, u128) {
+    let xt_to_send = api
+        .balance_transfer(MultiAddress::Id(AccountId::from(public)), amount)
+        .hex_encode();
+    let fee = if glitch_gas {
+        api.get_fee_details(xt_to_send.as_str(), None)
+            .unwrap()
+            .unwrap()
+            .final_fee()
+    } else {
+        0_u128
+    };
+
+    let amount_to_transfer = amount - fee;
+    let business_fee_amount =
+        (U256::from(amount_to_transfer) * U256::from(business_fee) / 100).as_u128();
+
+    let fee_counter = scanner_state.get_fee_counter().await;
+
+    scanner_state
+        .modify_fee_counter(fee_counter + business_fee_amount)
+        .await;
+
+    info!("Business fee amount is: {}", business_fee_amount);
+
+    info!("Amount received in the ETH transaction: {}", amount);
+    info!(
+        "Estimated fee for the transaction on the Glitch network {}",
+        fee
+    );
+    info!("Amount to be transferred {}", amount_to_transfer);
+
+    scanner_state.update_tx_to_processing(tx.id).await;
+
+    return (amount_to_transfer, business_fee_amount);
 }
 
 pub async fn transfer(
@@ -109,22 +138,32 @@ pub async fn transfer(
     business_fee: u128,
     glitch_gas: bool,
 ) {
-    // This is now done from Javascript.
-    /*
-    let seed: [u8; 32] = decode(glitch_pk.unwrap()).unwrap().try_into().unwrap();
-    let pair = Pair::from_seed(&seed);
-    let client = WsRpcClient::new(node_glitch.as_str()).unwrap();
-    let mut api =
-        Api::<_, _, AssetTipExtrinsicParams<Runtime>, Runtime>::new(client.clone()).unwrap();
-    api.set_signer(pair);
-    */
+    let client = WsRpcClient::new(&node_glitch);
+    let signer: sr25519::Pair = Pair::from_string(glitch_pk.as_ref().unwrap(), None).unwrap();
+    let signer_account_id = AccountId::from(signer.public());
+    let api: Api<sr25519::Pair, WsRpcClient, BaseExtrinsicParams<_>> =
+        Api::<_, _, PlainTipExtrinsicParams>::new(client)
+            .map(|api| api.set_signer(signer))
+            .unwrap();
 
     loop {
+        sleep(Duration::from_millis(5000)).await;
+
         let txs = scanner_state.txs_to_process().await;
 
         for tx in txs {
-            match Public::from_str(&tx.glitch_address) {
-                Ok(_) => (),
+            let signer_free_balance = match api.get_account_data(&signer_account_id).unwrap() {
+                Some(data) => data.free,
+                None => 0_u128,
+            };
+
+            if tx.amount.as_str().parse::<u128>().unwrap() > signer_free_balance {
+                warn!("There is not enough balance to continue processing transactions. To continue reload the account used as a signer.");
+                break;
+            }
+
+            let public = match Public::from_str(&tx.glitch_address) {
+                Ok(p) => p,
                 Err(error) => {
                     scanner_state
                         .save_with_error(tx.id, format!("Error with address: {error:?}"))
@@ -143,59 +182,61 @@ pub async fn transfer(
                 }
             };
 
-            let fee = if glitch_gas {
-                get_fee(amount, &tx.glitch_address)
-            } else {
-                0_u128
-            };
-
-            let amount_to_transfer = amount - fee;
-            let business_fee_amount =
-                (U256::from(amount_to_transfer) * U256::from(business_fee) / 100).as_u128();
-
-            let fee_counter = scanner_state.get_fee_counter().await;
-
-            scanner_state
-                .modify_fee_counter(fee_counter + business_fee_amount)
+            let (amount_to_transfer, business_fee_amount) =
+                calculate_amount_to_transfer_and_business_fee(
+                    &api,
+                    glitch_gas,
+                    amount,
+                    &tx,
+                    &scanner_state,
+                    business_fee,
+                    public,
+                )
                 .await;
-
-            info!("Business fee amount is: {}", business_fee_amount);
-
-            info!("Amount received in the ETH transaction: {}", amount);
-            info!(
-                "Estimated fee for the transaction on the Glitch network {}",
-                fee
-            );
-            info!("Amount to be transferred {}", amount_to_transfer);
-
             let scanner_state_clone = scanner_state.clone();
 
-            scanner_state.update_tx_to_processing(tx.id).await;
+            let signer_per_tx: sr25519::Pair =
+                Pair::from_string(glitch_pk.as_ref().unwrap(), None).unwrap();
+            let node_per_tx = node_glitch.clone();
 
             spawn_blocking(move || {
                 block_on(async {
-                    let tx_hash = js_call::transfer(
+                    let client = WsRpcClient::new(node_per_tx.as_str());
+                    let api = Api::<_, _, PlainTipExtrinsicParams>::new(client)
+                        .map(|api| api.set_signer(signer_per_tx))
+                        .unwrap();
+                    let xt_to_send = api.balance_transfer(
+                        MultiAddress::Id(AccountId::from(public)),
                         amount_to_transfer - business_fee_amount,
-                        &tx.glitch_address,
                     );
+                    let xt_result =
+                        match api.send_extrinsic(xt_to_send.hex_encode(), XtStatus::Finalized) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                error!("Transfer error: {:?}", e);
+                                None
+                            }
+                        };
 
-                    scanner_state_clone
-                        .update_tx(tx.id, tx_hash, business_fee_amount, business_fee)
-                        .await;
-
-                    info!("Trasfer to address {} completed!", tx.glitch_address);
+                    match xt_result {
+                        Some(hash) => {
+                            scanner_state_clone
+                                .update_tx(
+                                    tx.id,
+                                    format!("{:#x}", hash),
+                                    business_fee_amount,
+                                    business_fee,
+                                )
+                                .await;
+                            info!("Trasfer to address {} completed!", tx.glitch_address);
+                        }
+                        None => info!(
+                            "Transfer to address {} not completed. It will be tried again.",
+                            tx.glitch_address
+                        ),
+                    };
                 });
             });
         }
-
-        sleep(Duration::from_millis(5000)).await;
     }
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FeeResult {
-    pub class: String,
-    pub partial_fee: String,
-    pub weight: u128,
 }

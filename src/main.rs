@@ -3,7 +3,6 @@ mod block_listener;
 mod config;
 mod database;
 mod glitch;
-mod js_call;
 mod logger;
 mod scanner;
 
