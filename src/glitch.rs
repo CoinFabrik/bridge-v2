@@ -1,23 +1,15 @@
+use chrono::{NaiveDateTime, Utc};
+use log::{error, info, warn};
+use sp_core::{crypto::Pair, sr25519, sr25519::Public, U256};
 use std::str::FromStr;
-
-use chrono::NaiveDateTime;
-use chrono::Utc;
-use log::error;
-use log::info;
-use serde::Deserialize;
-use serde::Serialize;
-use serde_json::json;
-use sp_core::crypto::Pair;
-use sp_core::sr25519;
-use sp_core::sr25519::Public;
-use sp_core::U256;
-use substrate_api_client::BaseExtrinsicParams;
-use substrate_api_client::PlainTip;
-use substrate_api_client::PlainTipExtrinsicParams;
-use substrate_api_client::{rpc::WsRpcClient, AccountId, GenericAddress, MultiAddress};
-use substrate_api_client::{Api, XtStatus};
-use tokio::task::spawn_blocking;
-use tokio::time::{sleep, Duration};
+use substrate_api_client::{
+    rpc::WsRpcClient, AccountId, Api, BaseExtrinsicParams, GenericAddress, MultiAddress, PlainTip,
+    PlainTipExtrinsicParams, XtStatus,
+};
+use tokio::{
+    task::spawn_blocking,
+    time::{sleep, Duration},
+};
 use web3::block_on;
 
 use crate::database::ScannerState;
@@ -107,10 +99,10 @@ async fn calculate_amount_to_transfer_and_business_fee(
         .balance_transfer(MultiAddress::Id(AccountId::from(public)), amount)
         .hex_encode();
     let fee = if glitch_gas {
-        get_fee_request(&api, xt_to_send)
+        api.get_fee_details(xt_to_send.as_str(), None)
             .unwrap()
-            .parse::<u128>()
             .unwrap()
+            .final_fee()
     } else {
         0_u128
     };
@@ -148,15 +140,28 @@ pub async fn transfer(
 ) {
     let client = WsRpcClient::new(&node_glitch);
     let signer: sr25519::Pair = Pair::from_string(glitch_pk.as_ref().unwrap(), None).unwrap();
+    let signer_account_id = AccountId::from(signer.public());
     let api: Api<sr25519::Pair, WsRpcClient, BaseExtrinsicParams<_>> =
         Api::<_, _, PlainTipExtrinsicParams>::new(client)
             .map(|api| api.set_signer(signer))
             .unwrap();
 
     loop {
+        sleep(Duration::from_millis(5000)).await;
+
         let txs = scanner_state.txs_to_process().await;
 
         for tx in txs {
+            let signer_free_balance = match api.get_account_data(&signer_account_id).unwrap() {
+                Some(data) => data.free,
+                None => 0_u128,
+            };
+
+            if tx.amount.as_str().parse::<u128>().unwrap() > signer_free_balance {
+                warn!("There is not enough balance to continue processing transactions. To continue reload the account used as a signer.");
+                break;
+            }
+
             let public = match Public::from_str(&tx.glitch_address) {
                 Ok(p) => p,
                 Err(error) => {
@@ -233,32 +238,5 @@ pub async fn transfer(
                 });
             });
         }
-        sleep(Duration::from_millis(5000)).await;
     }
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FeeResult {
-    pub class: String,
-    pub partial_fee: String,
-    pub weight: u128,
-}
-
-fn get_fee_request(
-    api: &Api<sr25519::Pair, WsRpcClient, BaseExtrinsicParams<PlainTip>>,
-    xt_hex: String,
-) -> Option<String> {
-    let request = json!({
-        "method": "payment_queryInfo",
-        "params": vec![xt_hex],
-        "jsonrpc": "2.0",
-        "id": "1",
-    });
-
-    let result = api.get_request(request).unwrap()?;
-
-    let result_parsed: FeeResult = serde_json::from_str(&result).unwrap();
-
-    Some(result_parsed.partial_fee)
 }
