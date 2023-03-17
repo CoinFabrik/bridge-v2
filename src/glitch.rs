@@ -149,7 +149,14 @@ pub async fn transfer(
     loop {
         sleep(Duration::from_millis(5000)).await;
 
-        let txs = scanner_state.txs_to_process().await;
+        let mut txs = scanner_state.txs_to_process().await;
+
+        txs.sort_by(|a, b| {
+            a.amount
+                .parse::<u128>()
+                .unwrap()
+                .cmp(&b.amount.parse::<u128>().unwrap())
+        });
 
         for tx in txs {
             let signer_free_balance = match api.get_account_data(&signer_account_id).unwrap() {
