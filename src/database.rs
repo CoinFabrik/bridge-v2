@@ -1,10 +1,10 @@
 use log::{debug, error};
 use mysql_async::prelude::{BatchQuery, Queryable, WithParams};
-use mysql_async::{params, Conn, Pool, Row};
+use mysql_async::{params, Conn, Pool, Row, TxOpts};
 use sp_core::U256;
 use web3::types::{Log, H160, H256};
 
-use crate::config::Db;
+use crate::config::{self, Database};
 
 const SELECT_TRANSACTIONS_TO_PROCESS: &str =
     r"SELECT id, to_glitch_address, amount FROM tx WHERE state = 'TO_PROCESS'";
@@ -30,7 +30,7 @@ pub struct ScannerState {
     pub name: String,
     pub network: String,
     pub monitor_address: String,
-    pub config: Db,
+    pub config: Database,
     pub connection_pool: Pool,
 }
 
@@ -41,8 +41,211 @@ pub struct TxToProcess {
     pub amount: String,
 }
 
+pub struct DatabaseEngine {
+    pub host: String,
+    pub user: String,
+    pub password: String,
+    pub port: u32,
+    pub database: String,
+    pub connection_pool: Pool,
+}
+
+impl DatabaseEngine {
+    pub async fn establish_connection(&self) -> Conn {
+        self.connection_pool.get_conn().await.unwrap()
+    }
+}
+
+impl DatabaseEngine {
+    pub fn new(db_config: config::Database) -> Self {
+        let database_url = format!(
+            "mysql://{}:{}@{}:{}/{}",
+            db_config.username,
+            db_config.password,
+            db_config.host,
+            db_config.port,
+            db_config.database
+        );
+
+        Self {
+            host: db_config.host,
+            user: db_config.username,
+            password: db_config.password,
+            port: db_config.port,
+            database: db_config.database,
+            connection_pool: Pool::new(database_url.as_str()),
+        }
+    }
+
+    pub async fn txs_to_process(&self) -> Vec<TxToProcess> {
+        let mut conn = self.establish_connection().await;
+
+        let txs_to_process = conn
+            .query_map(
+                SELECT_TRANSACTIONS_TO_PROCESS,
+                |(id, glitch_address, amount)| TxToProcess {
+                    id,
+                    glitch_address,
+                    amount,
+                },
+            )
+            .await
+            .unwrap();
+
+        drop(conn);
+        txs_to_process
+    }
+
+    pub async fn update_tx_with_error(&self, id: u128, error_message: String) {
+        let mut conn = self.establish_connection().await;
+        let params = params! {
+            "id" => id,
+            "error" => error_message,
+        };
+
+        let result = conn.exec_drop(SAVE_ERROR, params).await;
+
+        match result {
+            Ok(_) => debug!("Glitch tx updated!"),
+            Err(e) => error!("Error in the glitch tx updated: {}", e),
+        }
+        drop(conn);
+    }
+
+    pub async fn increment_fee_counter(&self, scanner_name: String, amount: u128) {
+        let mut conn = self.establish_connection().await;
+
+        let current_fee_counter: u128 = conn
+            .exec_first(
+                SELECT_FEE_ACCUMULATED,
+                params! {
+                    "name" => &scanner_name
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        let params = params! {
+            "name" => scanner_name,
+            "accumulated_fees" => current_fee_counter + amount
+        };
+
+        let result = conn.exec_drop(UPDATE_FEE, params).await;
+
+        match result {
+            Ok(_) => debug!("Fee increased successful!"),
+            Err(e) => error!("Error in the fee increased: {}", e),
+        }
+    }
+
+    pub async fn update_tx(
+        &self,
+        id: u128,
+        glitch_hash: String,
+        business_fee_amount: u128,
+        business_fee_percentage: u128,
+    ) {
+        let mut conn = self.establish_connection().await;
+        let params = params! {
+            "id" => id,
+            "glitch_tx_hash" => glitch_hash,
+            "business_fee_amount" => business_fee_amount,
+            "business_fee_percentage" => business_fee_percentage
+        };
+
+        let result = conn.exec_drop(UPDATE_TX_GLITCH, params).await;
+
+        match result {
+            Ok(_) => debug!("Glitch tx updated!"),
+            Err(e) => error!("Error in the glitch tx updated: {}", e),
+        }
+        drop(conn);
+    }
+
+    pub async fn get_last_block(&self, scanner_name: String) -> u32 {
+        let mut conn = self.establish_connection().await;
+
+        let result: u32 = conn
+            .exec_first(
+                SELECT_LAST_BLOCK,
+                params! {
+                    "name" => scanner_name
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        drop(conn);
+        result
+    }
+
+    pub async fn update_block_and_insert_txs(
+        &self,
+        scanner_name: String,
+        block: u32,
+        logs: Vec<Log>,
+    ) {
+        let mut conn = self.establish_connection().await;
+        let mut tx = conn.start_transaction(TxOpts::new()).await.unwrap();
+
+        let params = params! {
+            "block" => block,
+            "name" => scanner_name
+        };
+
+        let update_block_result = tx.exec_drop(UPDATE_LAST_BLOCK, params).await;
+        match update_block_result {
+            Ok(_) => debug!("Block update successful!"),
+            Err(e) => error!("Error in the block update: {}", e),
+        }
+
+        if !logs.is_empty() {
+            let insert_logs_result = tx.exec_batch(
+                INSERT_TXS,
+                logs.iter().map(|tx| {
+                    let data: Vec<u8> = tx.data.0.clone();
+                    let data_chunks: Vec<&[u8]> = data.chunks(32).collect();
+                    let string_len = U256::from_big_endian(data_chunks[2]).as_usize();
+                    let glitch_address: Vec<u8> = [data_chunks[3], data_chunks[4]]
+                        .concat()
+                        .iter()
+                        .copied()
+                        .take(string_len)
+                        .collect();
+    
+                    params! {
+                        "tx_eth_hash" => format!("{:#x}",tx.transaction_hash.unwrap()),
+                        "from_eth_address" => h256_to_address(*tx.topics.get(1).unwrap()),
+                        "amount" => U256::from_big_endian(data_chunks[1]).to_string(),
+                        "to_glitch_address" => std::str::from_utf8(glitch_address.as_slice()).unwrap()
+                    }
+                }),
+            )
+            .await;
+
+            match insert_logs_result {
+                Ok(_) => debug!("Inserts successful!"),
+                Err(e) => error!("Inserts with error: {}", e),
+            }
+        }
+
+        if tx.affected_rows() > 0 {
+            tx.commit().await.unwrap()
+        } else {
+            tx.rollback().await.unwrap()
+        }
+    }
+}
+
 impl ScannerState {
-    pub fn new(name: String, network: String, monitor_address: String, db_config: Db) -> Self {
+    pub fn new(
+        name: String,
+        network: String,
+        monitor_address: String,
+        db_config: Database,
+    ) -> Self {
         let database_url = format!(
             "mysql://{}:{}@{}:{}/{}",
             db_config.username,

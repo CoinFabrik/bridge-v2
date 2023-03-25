@@ -1,5 +1,7 @@
+use std::sync::Arc;
+
 use crate::config;
-use crate::database::ScannerState;
+use crate::database::{DatabaseEngine, ScannerState};
 use futures::executor::block_on;
 use futures::StreamExt;
 use log::{error, info, warn};
@@ -9,6 +11,85 @@ use web3::api::{Eth, EthSubscribe, Namespace};
 use web3::signing::keccak256;
 use web3::transports::WebSocket;
 use web3::types::{BlockNumber, FilterBuilder, Log, H160, H256, U64};
+
+pub async fn listen_blocks_v2(
+    network_config: config::Network,
+    database_engine: Arc<DatabaseEngine>,
+) {
+    info!(
+        "Running block listener to network {}",
+        network_config.network
+    );
+
+    loop {
+        match WebSocket::new(&network_config.ws_node).await {
+            Ok(transport) => {
+                info!(
+                    "WebSocket connection for {} is now open!",
+                    &network_config.network
+                );
+
+                let subscribe = EthSubscribe::new(transport);
+
+                let mut subscription = subscribe.subscribe_new_heads().await.unwrap();
+
+                while let Some(b) = subscription.next().await {
+                    let block: U64 =
+                        b.as_ref().unwrap().number.unwrap() - network_config.confirmations;
+                    let last_block: U64 = U64::from(
+                        database_engine
+                            .get_last_block(network_config.name.clone())
+                            .await,
+                    );
+                    info!(
+                        "New block in {}: {:?}",
+                        &network_config.network,
+                        b.unwrap().number.unwrap()
+                    );
+
+                    let eth = Eth::new(subscribe.transport());
+
+                    let address: H160 = network_config.monitor_address.parse().unwrap();
+                    let topic_bytes =
+                        keccak256("TransferToGlitch(address,string,uint256)".as_bytes());
+
+                    let filter = FilterBuilder::default()
+                        .address(vec![address])
+                        .from_block(BlockNumber::Number(last_block))
+                        .to_block(BlockNumber::Number(block))
+                        .topics(Some(vec![H256::from(topic_bytes)]), None, None, None)
+                        .build();
+
+                    match eth.logs(filter).await {
+                        Ok(logs) => {
+                            info!("{} transactions found in block {}", logs.len(), block);
+
+                            database_engine
+                                .update_block_and_insert_txs(
+                                    network_config.name.clone(),
+                                    block.as_u32(),
+                                    logs,
+                                )
+                                .await;
+                        }
+                        Err(e) => {
+                            error!("Error obtaining contract logs on the Ethereum network: {e}")
+                        }
+                    };
+                }
+            }
+            Err(e) => error!(
+                "Error connecting with {} network: {:?}",
+                network_config.network, e
+            ),
+        }
+
+        warn!(
+            "Restarting the {} network listening.",
+            network_config.network
+        );
+    }
+}
 
 pub async fn listen_blocks(network_config: config::Network, scanner_state: ScannerState) {
     info!(
