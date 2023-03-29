@@ -29,6 +29,14 @@ pub async fn listen_blocks_v2(
                     &network_config.network
                 );
 
+                tokio::task::spawn(catch_up_v2(
+                    transport.clone(),
+                    network_config.name.clone(),
+                    network_config.network.clone(),
+                    network_config.monitor_address.clone(),
+                    database_engine.clone(),
+                ));
+
                 let subscribe = EthSubscribe::new(transport);
 
                 let mut subscription = subscribe.subscribe_new_heads().await.unwrap();
@@ -38,7 +46,7 @@ pub async fn listen_blocks_v2(
                         b.as_ref().unwrap().number.unwrap() - network_config.confirmations;
                     let last_block: U64 = U64::from(
                         database_engine
-                            .get_last_block(network_config.name.clone())
+                            .get_last_block(network_config.name.as_str())
                             .await,
                     );
                     info!(
@@ -164,6 +172,79 @@ pub async fn listen_blocks(network_config: config::Network, scanner_state: Scann
             network_config.network
         );
     }
+}
+
+pub async fn catch_up_v2(
+    ws: WebSocket,
+    scanner_name: String,
+    network: String,
+    monitor_address: String,
+    database_engine: Arc<DatabaseEngine>,
+) {
+    let eth = Eth::new(ws);
+
+    if !database_engine
+        .exists_network_state(
+            scanner_name.as_str(),
+            network.as_str(),
+            monitor_address.as_str(),
+        )
+        .await
+    {
+        return;
+    }
+
+    let last_scanned_block = database_engine.get_last_block(scanner_name.as_str()).await;
+    let address: H160 = monitor_address.parse().unwrap();
+    let topic_bytes = keccak256("TransferToGlitch(address,string,uint256)".as_bytes());
+    let from_block = BlockNumber::Number(U64::from(last_scanned_block + 1));
+
+    info!(
+        "Starting catch up from block {} to current block.",
+        last_scanned_block + 1
+    );
+
+    let filter = FilterBuilder::default()
+        .address(vec![address])
+        .from_block(from_block)
+        .topics(Some(vec![H256::from(topic_bytes)]), None, None, None)
+        .to_block(BlockNumber::Latest)
+        .build();
+
+    let result_logs: Result<Vec<Log>, web3::Error> = eth.logs(filter).await;
+    let mut logs_to_persist: Vec<Log> = Vec::new();
+
+    match result_logs {
+        Ok(mut result) => {
+            if result.is_empty() {
+                info!("No past transactions were found for processing.");
+            } else {
+                info!("{} transactions were found.", result.len());
+
+                logs_to_persist.append(&mut result);
+            }
+        }
+        Err(e) => match e {
+            web3::Error::Rpc(error) => {
+                println!("{:?}", error.code);
+
+                let regex = Regex::new("0[xX][0-9a-fA-F]+").unwrap();
+
+                let result: Vec<String> = regex
+                    .find_iter(error.message.as_str())
+                    .map(|mat| mat.as_str().to_string())
+                    .collect();
+
+                let without_prefix = result[0].trim_start_matches("0x");
+                println!("{:?}", u64::from_str_radix(without_prefix, 16));
+            }
+            _ => panic!("{e:?}"),
+        },
+    }
+
+    database_engine.insert_txs(logs_to_persist).await;
+
+    info!("Finish catch up.");
 }
 
 pub async fn catch_up(ws: WebSocket, scanner_state: ScannerState) {

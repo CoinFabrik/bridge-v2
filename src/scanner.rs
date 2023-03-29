@@ -1,7 +1,7 @@
 use crate::block_listener::{listen_blocks, listen_blocks_v2};
 use crate::config::{Database, Network};
 use crate::database::DatabaseEngine;
-use crate::glitch::{self, fee_payer, run_network_listener};
+use crate::glitch::{self, fee_payer, fee_payer_v2, run_network_listener};
 use crate::{Config, ScannerState};
 use futures::executor::block_on;
 use log::info;
@@ -46,6 +46,11 @@ impl ScannerV2 {
         );
 
         self.networks.iter().for_each(|network_config| {
+            tokio::task::spawn(listen_blocks_v2(
+                network_config.clone(),
+                self.database_engine.clone(),
+            ));
+
             tokio::task::spawn(run_network_listener(
                 network_config.name.clone(),
                 network_config.network.clone(),
@@ -57,9 +62,12 @@ impl ScannerV2 {
                 self.database_engine.clone(),
             ));
 
-            tokio::task::spawn(listen_blocks_v2(
-                network_config.clone(),
+            tokio::task::spawn(fee_payer_v2(
                 self.database_engine.clone(),
+                self.interval_days_for_transfer,
+                network_config.name.clone(),
+                self.glitch_private_key.clone(),
+                self.glitch_fee_address.clone(),
             ));
         });
 

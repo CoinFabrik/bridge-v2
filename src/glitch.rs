@@ -184,6 +184,68 @@ async fn is_time_to_pay_fee(scanner_state: &ScannerState, interval_in_days: i64)
     Utc::now().timestamp() - last_day_payment.timestamp() >= (interval_in_days * 86000)
 }
 
+async fn is_time_to_pay_fee_v2(last_time_fee: &str, interval_in_days: i64) -> bool {
+    let last_day_payment =
+        NaiveDateTime::parse_from_str(last_time_fee, "%Y-%m-%d %H:%M:%S").unwrap();
+    Utc::now().timestamp() - last_day_payment.timestamp() >= (interval_in_days * 86000)
+}
+
+pub async fn fee_payer_v2(
+    database_engine: Arc<DatabaseEngine>,
+    interval_in_days: u8,
+    scanner_name: String,
+    glitch_pk: String,
+    fee_address: String,
+) {
+    loop {
+        sleep(Duration::from_secs(60)).await;
+        let fee_last_time = database_engine.get_fee_last_time().await;
+        if is_time_to_pay_fee_v2(fee_last_time.as_str(), interval_in_days as i64).await {
+            let fee_to_send = database_engine.get_fee_counter(scanner_name.as_str()).await;
+
+            if fee_to_send != 0 {
+                let signer: sr25519::Pair = Pair::from_string(glitch_pk.as_str(), None).unwrap();
+                let client = WsRpcClient::new("ws://13.212.108.116:9944");
+                let api = Api::<_, _, PlainTipExtrinsicParams>::new(client)
+                    .map(|api| api.set_signer(signer))
+                    .unwrap();
+
+                let account_id = AccountId::from(Public::from_str(fee_address.as_str()).unwrap());
+
+                let xt = api.balance_transfer(GenericAddress::Id(account_id), fee_to_send);
+
+                let xt_result = match api.send_extrinsic(xt.hex_encode(), XtStatus::Finalized) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        error!("Transfer error: {:?}", e);
+                        None
+                    }
+                };
+
+                match xt_result {
+                    Some(hash) => {
+                        database_engine
+                            .modify_fee_counter(0, scanner_name.as_str())
+                            .await;
+                        database_engine
+                            .insert_tx_fee(format!("{:#x}", hash), fee_to_send.to_string())
+                            .await;
+                        info!(
+                            "The transfer of the business fee ({}) has been completed",
+                            fee_to_send
+                        );
+                    }
+                    None => {
+                        info!(
+                            "Transfer of the business fee not completed. It will be tried again."
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub async fn fee_payer(
     scanner_state: ScannerState,
     interval_in_days: u8,
