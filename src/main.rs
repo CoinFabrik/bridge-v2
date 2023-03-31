@@ -9,10 +9,7 @@ mod scanner;
 use crate::args::Args;
 use crate::config::Config;
 use clap::Parser;
-use database::ScannerState;
-use scanner::Scanner;
 use scanner::ScannerV2;
-use std::sync::Arc;
 
 const TITLE: &str = r#"
                                                                                                               
