@@ -1,6 +1,7 @@
 use chrono::{NaiveDateTime, Utc};
+use futures::future::join_all;
 use log::{error, info, warn};
-use sp_core::{crypto::Pair, sr25519, sr25519::Public, H256, U256};
+use sp_core::{crypto::Pair, sr25519, sr25519::Public, U256};
 use std::{str::FromStr, sync::Arc};
 use substrate_api_client::{
     rpc::WsRpcClient, AccountId, Api, BaseExtrinsicParams, GenericAddress, MultiAddress, PlainTip,
@@ -52,24 +53,51 @@ async fn calculate_amount_to_transfer_and_business_fee_v2(
 }
 
 pub async fn make_transfer(
+    tx_ix: u128,
+    tx_glitch_address: String,
     node: &str,
     glitch_pk: String,
     public: Public,
-    amount: u128,
-) -> Option<H256> {
+    amount_to_transfer: u128,
+    amount_business_fee: u128,
+    database_engine: Arc<DatabaseEngine>,
+    business_fee_percentage: u128,
+) {
     let client = WsRpcClient::new(node);
     let signer: sr25519::Pair = Pair::from_string(&glitch_pk, None).unwrap();
     let api = Api::<_, _, PlainTipExtrinsicParams>::new(client)
         .map(|api| api.set_signer(signer))
         .unwrap();
-    let xt_to_send = api.balance_transfer(MultiAddress::Id(AccountId::from(public)), amount);
-    match api.send_extrinsic(xt_to_send.hex_encode(), XtStatus::Finalized) {
+    let xt_to_send = api.balance_transfer(
+        MultiAddress::Id(AccountId::from(public)),
+        amount_to_transfer - amount_business_fee,
+    );
+
+    let xt_result = match api.send_extrinsic(xt_to_send.hex_encode(), XtStatus::Finalized) {
         Ok(r) => r,
         Err(e) => {
             error!("Transfer error: {:?}", e);
             None
         }
-    }
+    };
+
+    match xt_result {
+        Some(hash) => {
+            database_engine
+                .update_tx(
+                    tx_ix,
+                    format!("{:#x}", hash),
+                    amount_business_fee,
+                    business_fee_percentage,
+                )
+                .await;
+            info!("Trasfer to address {} completed!", tx_glitch_address);
+        }
+        None => info!(
+            "Transfer to address {} not completed. It will be tried again.",
+            tx_glitch_address
+        ),
+    };
 }
 
 pub async fn run_network_listener(
@@ -93,7 +121,6 @@ pub async fn run_network_listener(
     loop {
         tokio::select! {
             _ = interval.tick() => {
-                info!("One iteration in runNetworkListener");
 
                 let mut txs = database_engine.txs_to_process().await;
 
@@ -103,6 +130,8 @@ pub async fn run_network_listener(
                         .unwrap()
                         .cmp(&b.amount.parse::<u128>().unwrap())
                 });
+
+                let mut tasks = vec![];
 
                 for tx in txs {
                     let signer_free_balance = match api.get_account_data(&signer_account_id).unwrap() {
@@ -135,27 +164,11 @@ pub async fn run_network_listener(
                     };
                     let (amount_to_transfer, business_fee_amount) = calculate_amount_to_transfer_and_business_fee_v2(name.clone(), &api, glitch_gas, amount, business_fee, public, database_engine.clone()).await;
 
-                    let xt_result = make_transfer(glitch_node.as_str(), glitch_pk.clone(), public, amount_to_transfer - business_fee).await;
-
-                    match xt_result {
-                        Some(hash) => {
-                            database_engine
-                                .update_tx(
-                                    tx.id,
-                                    format!("{:#x}", hash),
-                                    business_fee_amount,
-                                    business_fee,
-                                )
-                                .await;
-                            info!("Trasfer to address {} completed!", tx.glitch_address);
-                        }
-                        None => info!(
-                            "Transfer to address {} not completed. It will be tried again.",
-                            tx.glitch_address
-                        ),
-                    };
+                    tasks.push(make_transfer(tx.id, tx.glitch_address, glitch_node.as_str(), glitch_pk.clone(), public, amount_to_transfer, business_fee_amount, database_engine.clone(), business_fee));
 
                 }
+
+                join_all(tasks).await;
             }
         }
     }

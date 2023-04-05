@@ -42,11 +42,6 @@ pub async fn listen_blocks_v2(
                 while let Some(b) = subscription.next().await {
                     let block: U64 =
                         b.as_ref().unwrap().number.unwrap() - network_config.confirmations;
-                    let last_block: U64 = U64::from(
-                        database_engine
-                            .get_last_block(network_config.name.as_str())
-                            .await,
-                    );
                     info!(
                         "New block in {}: {:?}",
                         &network_config.network,
@@ -61,7 +56,7 @@ pub async fn listen_blocks_v2(
 
                     let filter = FilterBuilder::default()
                         .address(vec![address])
-                        .from_block(BlockNumber::Number(last_block))
+                        .from_block(BlockNumber::Number(block))
                         .to_block(BlockNumber::Number(block))
                         .topics(Some(vec![H256::from(topic_bytes)]), None, None, None)
                         .build();
