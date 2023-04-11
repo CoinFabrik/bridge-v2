@@ -11,12 +11,12 @@ pub struct Config {
     pub interval_days_for_transfer: u8,
     pub business_fee: u128,
     pub glitch_gas: bool,
-    pub db: Db,
+    pub db: Database,
     pub networks: Vec<Network>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Db {
+pub struct Database {
     pub host: String,
     pub port: u32,
     pub database: String,

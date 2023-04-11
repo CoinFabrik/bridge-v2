@@ -1,16 +1,19 @@
+use std::sync::Arc;
+
 use crate::config;
-use crate::database::ScannerState;
-use futures::executor::block_on;
+use crate::database::DatabaseEngine;
 use futures::StreamExt;
 use log::{error, info, warn};
 use regex::Regex;
-use tokio::task::spawn_blocking;
 use web3::api::{Eth, EthSubscribe, Namespace};
 use web3::signing::keccak256;
 use web3::transports::WebSocket;
 use web3::types::{BlockNumber, FilterBuilder, Log, H160, H256, U64};
 
-pub async fn listen_blocks(network_config: config::Network, scanner_state: ScannerState) {
+pub async fn listen_blocks_v2(
+    network_config: config::Network,
+    database_engine: Arc<DatabaseEngine>,
+) {
     info!(
         "Running block listener to network {}",
         network_config.network
@@ -24,21 +27,21 @@ pub async fn listen_blocks(network_config: config::Network, scanner_state: Scann
                     &network_config.network
                 );
 
+                tokio::task::spawn(catch_up_v2(
+                    transport.clone(),
+                    network_config.name.clone(),
+                    network_config.network.clone(),
+                    network_config.monitor_address.clone(),
+                    database_engine.clone(),
+                ));
+
                 let subscribe = EthSubscribe::new(transport);
-
-                let transport_clone = subscribe.transport().clone();
-                let ss = scanner_state.clone();
-
-                spawn_blocking(move || block_on(catch_up(transport_clone, ss)));
 
                 let mut subscription = subscribe.subscribe_new_heads().await.unwrap();
 
                 while let Some(b) = subscription.next().await {
                     let block: U64 =
                         b.as_ref().unwrap().number.unwrap() - network_config.confirmations;
-
-                    scanner_state.update_block(block.as_u32()).await;
-
                     info!(
                         "New block in {}: {:?}",
                         &network_config.network,
@@ -60,11 +63,15 @@ pub async fn listen_blocks(network_config: config::Network, scanner_state: Scann
 
                     match eth.logs(filter).await {
                         Ok(logs) => {
-                            if !logs.is_empty() {
-                                info!("{} transactions found in block {}", logs.len(), block);
+                            info!("{} transactions found in block {}", logs.len(), block);
 
-                                ScannerState::insert_txs(&scanner_state, logs).await;
-                            }
+                            database_engine
+                                .update_block_and_insert_txs(
+                                    network_config.name.clone(),
+                                    block.as_u32(),
+                                    logs,
+                                )
+                                .await;
                         }
                         Err(e) => {
                             error!("Error obtaining contract logs on the Ethereum network: {e}")
@@ -85,16 +92,28 @@ pub async fn listen_blocks(network_config: config::Network, scanner_state: Scann
     }
 }
 
-pub async fn catch_up(ws: WebSocket, scanner_state: ScannerState) {
+pub async fn catch_up_v2(
+    ws: WebSocket,
+    scanner_name: String,
+    network: String,
+    monitor_address: String,
+    database_engine: Arc<DatabaseEngine>,
+) {
     let eth = Eth::new(ws);
 
-    if !scanner_state.exists_network_state().await {
+    if !database_engine
+        .exists_network_state(
+            scanner_name.as_str(),
+            network.as_str(),
+            monitor_address.as_str(),
+        )
+        .await
+    {
         return;
     }
 
-    let last_scanned_block = scanner_state.get_last_block().await;
-
-    let address: H160 = scanner_state.monitor_address.parse().unwrap();
+    let last_scanned_block = database_engine.get_last_block(scanner_name.as_str()).await;
+    let address: H160 = monitor_address.parse().unwrap();
     let topic_bytes = keccak256("TransferToGlitch(address,string,uint256)".as_bytes());
     let from_block = BlockNumber::Number(U64::from(last_scanned_block + 1));
 
@@ -141,7 +160,7 @@ pub async fn catch_up(ws: WebSocket, scanner_state: ScannerState) {
         },
     }
 
-    scanner_state.insert_txs(logs_to_persist).await;
+    database_engine.insert_txs(logs_to_persist).await;
 
     info!("Finish catch up.");
 }

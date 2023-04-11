@@ -9,9 +9,7 @@ mod scanner;
 use crate::args::Args;
 use crate::config::Config;
 use clap::Parser;
-use database::ScannerState;
-use scanner::Scanner;
-use std::sync::Arc;
+use scanner::ScannerV2;
 
 const TITLE: &str = r#"
                                                                                                               
@@ -38,9 +36,9 @@ async fn main() -> web3::Result<()> {
 
     logger::config(args.loglevel);
 
-    let config: Arc<Config> = Arc::new(Config::new(args).check_private_keys());
+    let config: Config = Config::new(args).check_private_keys();
 
-    Scanner::new(config).run();
+    ScannerV2::new(config).run();
 
     Ok(())
 }
