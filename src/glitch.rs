@@ -197,10 +197,20 @@ pub async fn fee_payer_v2(
 
             if fee_to_send != 0 {
                 let signer: sr25519::Pair = Pair::from_string(glitch_pk.as_str(), None).unwrap();
+                let signer_account_id = AccountId::from(signer.public());
                 let client = WsRpcClient::new("ws://13.212.108.116:9944");
                 let api = Api::<_, _, PlainTipExtrinsicParams>::new(client)
                     .map(|api| api.set_signer(signer))
                     .unwrap();
+                let signer_free_balance = match api.get_account_data(&signer_account_id).unwrap() {
+                    Some(data) => data.free,
+                    None => 0_u128,
+                };
+
+                if fee_to_send > signer_free_balance {
+                    warn!("There are not enough funds to send the business fee.");
+                    break;
+                }
 
                 let account_id = AccountId::from(Public::from_str(fee_address.as_str()).unwrap());
 
