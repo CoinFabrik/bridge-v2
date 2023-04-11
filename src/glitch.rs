@@ -131,8 +131,6 @@ pub async fn run_network_listener(
                         .cmp(&b.amount.parse::<u128>().unwrap())
                 });
 
-                let mut tasks = vec![];
-
                 for tx in txs {
                     let signer_free_balance = match api.get_account_data(&signer_account_id).unwrap() {
                         Some(data) => data.free,
@@ -164,11 +162,9 @@ pub async fn run_network_listener(
                     };
                     let (amount_to_transfer, business_fee_amount) = calculate_amount_to_transfer_and_business_fee_v2(name.clone(), &api, glitch_gas, amount, business_fee, public, database_engine.clone()).await;
 
-                    tasks.push(make_transfer(tx.id, tx.glitch_address, glitch_node.as_str(), glitch_pk.clone(), public, amount_to_transfer, business_fee_amount, database_engine.clone(), business_fee));
+                    make_transfer(tx.id, tx.glitch_address, glitch_node.as_str(), glitch_pk.clone(), public, amount_to_transfer, business_fee_amount, database_engine.clone(), business_fee).await;
 
                 }
-
-                join_all(tasks).await;
             }
         }
     }
