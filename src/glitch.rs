@@ -196,6 +196,8 @@ pub async fn fee_payer_v2(
             let fee_to_send = database_engine.get_fee_counter(scanner_name.as_str()).await;
 
             if fee_to_send != 0 {
+                info!("It's time to pay business fee!");
+                info!("Executing transfer of {} as business fee.", fee_to_send);
                 let signer: sr25519::Pair = Pair::from_string(glitch_pk.as_str(), None).unwrap();
                 let signer_account_id = AccountId::from(signer.public());
                 let client = WsRpcClient::new("ws://13.212.108.116:9944");
