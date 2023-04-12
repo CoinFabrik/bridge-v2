@@ -56,6 +56,7 @@ impl ScannerV2 {
             tokio::task::spawn(fee_payer_v2(
                 self.database_engine.clone(),
                 self.interval_days_for_transfer,
+                network_config.ws_glitch_node.clone(),
                 network_config.name.clone(),
                 self.glitch_private_key.clone(),
                 self.glitch_fee_address.clone(),

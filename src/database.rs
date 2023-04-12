@@ -22,7 +22,7 @@ const UPDATE_FEE: &str =
 const UPDATE_TX_GLITCH: &str = r"UPDATE tx SET tx_glitch_hash = :glitch_tx_hash, state = 'PROCESSED', business_fee_amount = :business_fee_amount, business_fee_percentage = :business_fee_percentage WHERE id = :id";
 const INSERT_TXS: &str = r"INSERT INTO tx (tx_eth_hash, from_eth_address, amount, to_glitch_address) VALUES (:tx_eth_hash, :from_eth_address, :amount, :to_glitch_address)";
 const SAVE_ERROR: &str = r"UPDATE tx SET error = :error WHERE id = :id";
-const GET_LAST_FEE_TIME: &str = r"SELECT MAX(time) as time FROM fee_transaction";
+const GET_LAST_FEE_TIME: &str = r"SELECT time FROM fee_transaction ft ORDER BY time DESC LIMIT 1";
 
 #[derive(Clone)]
 pub struct ScannerState {
@@ -76,9 +76,9 @@ impl DatabaseEngine {
         }
     }
 
-    pub async fn get_fee_last_time(&self) -> String {
+    pub async fn get_fee_last_time(&self) -> Option<String> {
         let mut conn = self.establish_connection().await;
-        let result: String = conn.query_first(GET_LAST_FEE_TIME).await.unwrap().unwrap();
+        let result: Option<String> = conn.query_first(GET_LAST_FEE_TIME).await.unwrap();
         drop(conn);
         result
     }

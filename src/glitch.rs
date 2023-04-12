@@ -1,5 +1,4 @@
 use chrono::{NaiveDateTime, Utc};
-use futures::future::join_all;
 use log::{error, info, warn};
 use sp_core::{crypto::Pair, sr25519, sr25519::Public, U256};
 use std::{str::FromStr, sync::Arc};
@@ -7,18 +6,16 @@ use substrate_api_client::{
     rpc::WsRpcClient, AccountId, Api, BaseExtrinsicParams, GenericAddress, MultiAddress, PlainTip,
     PlainTipExtrinsicParams, XtStatus,
 };
-use tokio::time::{sleep, Duration};
+use tokio::time::Duration;
 
 use crate::database::DatabaseEngine;
 
 async fn calculate_amount_to_transfer_and_business_fee_v2(
-    scanner_name: String,
     api: &Api<sr25519::Pair, WsRpcClient, BaseExtrinsicParams<PlainTip>>,
     glitch_gas: bool,
     amount: u128,
     business_fee: u128,
     public: Public,
-    database_engine: Arc<DatabaseEngine>,
 ) -> (u128, u128) {
     let xt_to_send = api
         .balance_transfer(MultiAddress::Id(AccountId::from(public)), amount)
@@ -36,10 +33,6 @@ async fn calculate_amount_to_transfer_and_business_fee_v2(
     let business_fee_amount =
         (U256::from(amount_to_transfer) * U256::from(business_fee) / 100).as_u128();
 
-    database_engine
-        .increment_fee_counter(scanner_name, business_fee_amount)
-        .await;
-
     info!("Business fee amount is: {}", business_fee_amount);
 
     info!("Amount received in the ETH transaction: {}", amount);
@@ -53,6 +46,7 @@ async fn calculate_amount_to_transfer_and_business_fee_v2(
 }
 
 pub async fn make_transfer(
+    scanner_name: String,
     tx_ix: u128,
     tx_glitch_address: String,
     node: &str,
@@ -90,6 +84,9 @@ pub async fn make_transfer(
                     amount_business_fee,
                     business_fee_percentage,
                 )
+                .await;
+            database_engine
+                .increment_fee_counter(scanner_name, amount_business_fee)
                 .await;
             info!("Trasfer to address {} completed!", tx_glitch_address);
         }
@@ -160,9 +157,9 @@ pub async fn run_network_listener(
                             continue;
                         }
                     };
-                    let (amount_to_transfer, business_fee_amount) = calculate_amount_to_transfer_and_business_fee_v2(name.clone(), &api, glitch_gas, amount, business_fee, public, database_engine.clone()).await;
+                    let (amount_to_transfer, business_fee_amount) = calculate_amount_to_transfer_and_business_fee_v2(&api, glitch_gas, amount, business_fee, public).await;
 
-                    make_transfer(tx.id, tx.glitch_address, glitch_node.as_str(), glitch_pk.clone(), public, amount_to_transfer, business_fee_amount, database_engine.clone(), business_fee).await;
+                    make_transfer(name.clone(),tx.id, tx.glitch_address, glitch_node.as_str(), glitch_pk.clone(), public, amount_to_transfer, business_fee_amount, database_engine.clone(), business_fee).await;
 
                 }
             }
@@ -176,73 +173,86 @@ pub async fn run_network_listener(
 // - ESTADO INTERMEDIO
 // - FLOTANTE PARA EL FEE
 
-async fn is_time_to_pay_fee_v2(last_time_fee: &str, interval_in_days: i64) -> bool {
-    let last_day_payment =
-        NaiveDateTime::parse_from_str(last_time_fee, "%Y-%m-%d %H:%M:%S").unwrap();
+async fn is_time_to_pay_fee_v2(last_time_fee: Option<String>, interval_in_days: i64) -> bool {
+    let last_day_payment = match last_time_fee {
+        Some(time) => NaiveDateTime::parse_from_str(&time, "%Y-%m-%d %H:%M:%S").unwrap(),
+        None => NaiveDateTime::from_timestamp_millis(Utc::now().timestamp()).unwrap(),
+    };
+
     Utc::now().timestamp() - last_day_payment.timestamp() >= (interval_in_days * 86000)
 }
 
 pub async fn fee_payer_v2(
     database_engine: Arc<DatabaseEngine>,
     interval_in_days: u8,
+    glitch_node: String,
     scanner_name: String,
     glitch_pk: String,
     fee_address: String,
 ) {
+    let mut interval = tokio::time::interval(Duration::from_secs(60));
+    let signer: sr25519::Pair = Pair::from_string(glitch_pk.as_str(), None).unwrap();
+    let signer_account_id = AccountId::from(signer.public());
+    let client = WsRpcClient::new(&glitch_node); // Before "ws://13.212.108.116:9944"
+    let api = Api::<_, _, PlainTipExtrinsicParams>::new(client)
+        .map(|api| api.set_signer(signer))
+        .unwrap();
     loop {
-        sleep(Duration::from_secs(60)).await;
-        let fee_last_time = database_engine.get_fee_last_time().await;
-        if is_time_to_pay_fee_v2(fee_last_time.as_str(), interval_in_days as i64).await {
-            let fee_to_send = database_engine.get_fee_counter(scanner_name.as_str()).await;
+        tokio::select! {
+            _ = interval.tick() => {
+                let fee_last_time = database_engine.get_fee_last_time().await;
+                info!("Fee last time: {:?}", fee_last_time);
+                if is_time_to_pay_fee_v2(fee_last_time, interval_in_days as i64).await {
+                    let fee_to_send = database_engine.get_fee_counter(scanner_name.as_str()).await;
 
-            if fee_to_send != 0 {
-                info!("It's time to pay business fee!");
-                info!("Executing transfer of {} as business fee.", fee_to_send);
-                let signer: sr25519::Pair = Pair::from_string(glitch_pk.as_str(), None).unwrap();
-                let signer_account_id = AccountId::from(signer.public());
-                let client = WsRpcClient::new("ws://13.212.108.116:9944");
-                let api = Api::<_, _, PlainTipExtrinsicParams>::new(client)
-                    .map(|api| api.set_signer(signer))
-                    .unwrap();
-                let signer_free_balance = match api.get_account_data(&signer_account_id).unwrap() {
-                    Some(data) => data.free,
-                    None => 0_u128,
-                };
+                    if fee_to_send != 0 {
+                        info!("It's time to pay business fee!");
+                        info!("Executing transfer of {} as business fee.", fee_to_send);
 
-                if fee_to_send > signer_free_balance {
-                    warn!("There are not enough funds to send the business fee.");
-                    break;
-                }
+                        let signer_free_balance = match api.get_account_data(&signer_account_id).unwrap() {
+                            Some(data) => {
+                                warn!("Signer balance is: {:?}", data);
+                                data.free
+                            },
+                            None => 0_u128,
+                        };
 
-                let account_id = AccountId::from(Public::from_str(fee_address.as_str()).unwrap());
+                        if fee_to_send > signer_free_balance {
+                            warn!("There are not enough funds to send the business fee.");
+                            continue;
+                        }
 
-                let xt = api.balance_transfer(GenericAddress::Id(account_id), fee_to_send);
+                        let account_id = AccountId::from(Public::from_str(fee_address.as_str()).unwrap());
 
-                let xt_result = match api.send_extrinsic(xt.hex_encode(), XtStatus::Finalized) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        error!("Transfer error: {:?}", e);
-                        None
-                    }
-                };
+                        let xt = api.balance_transfer(GenericAddress::Id(account_id), fee_to_send);
 
-                match xt_result {
-                    Some(hash) => {
-                        database_engine
-                            .modify_fee_counter(0, scanner_name.as_str())
-                            .await;
-                        database_engine
-                            .insert_tx_fee(format!("{:#x}", hash), fee_to_send.to_string())
-                            .await;
-                        info!(
-                            "The transfer of the business fee ({}) has been completed",
-                            fee_to_send
-                        );
-                    }
-                    None => {
-                        info!(
-                            "Transfer of the business fee not completed. It will be tried again."
-                        );
+                        let xt_result = match api.send_extrinsic(xt.hex_encode(), XtStatus::Finalized) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                error!("Transfer error: {:?}", e);
+                                None
+                            }
+                        };
+
+                        match xt_result {
+                            Some(hash) => {
+                                database_engine
+                                    .modify_fee_counter(0, scanner_name.as_str())
+                                    .await;
+                                database_engine
+                                    .insert_tx_fee(format!("{:#x}", hash), fee_to_send.to_string())
+                                    .await;
+                                info!(
+                                    "The transfer of the business fee ({}) has been completed",
+                                    fee_to_send
+                                );
+                            }
+                            None => {
+                                info!(
+                                    "Transfer of the business fee not completed. It will be tried again."
+                                );
+                            }
+                        }
                     }
                 }
             }
