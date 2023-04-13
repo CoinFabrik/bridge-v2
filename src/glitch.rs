@@ -167,11 +167,35 @@ pub async fn run_network_listener(
     }
 }
 
-// MEJORAS GLITCH:
+pub async fn fee_payer_v2(
+    database_engine: Arc<DatabaseEngine>,
+    interval_in_days: u8,
+    glitch_node: String,
+    scanner_name: String,
+    glitch_pk: String,
+    fee_address: String,
+) {
+    let mut interval = tokio::time::interval(Duration::from_secs(60));
+    let signer: sr25519::Pair = Pair::from_string(&glitch_pk, None).unwrap();
+    let signer_account_id = AccountId::from(signer.public());
+    let client = WsRpcClient::new(&glitch_node); // Before "ws://13.212.108.116:9944"
+    let api = Api::<_, _, PlainTipExtrinsicParams>::new(client)
+        .map(|api| api.set_signer(signer))
+        .unwrap();
 
-// - ASINCRONISMO EN TRANSFERENCIAS EN GLITCH
-// - ESTADO INTERMEDIO
-// - FLOTANTE PARA EL FEE
+    loop {
+        interval.tick().await;
+        make_fee_transfer(
+            database_engine.clone(),
+            interval_in_days,
+            &scanner_name,
+            &api,
+            &signer_account_id,
+            &fee_address,
+        )
+        .await;
+    }
+}
 
 async fn is_time_to_pay_fee_v2(last_time_fee: Option<String>, interval_in_days: i64) -> bool {
     let last_day_payment = match last_time_fee {
@@ -182,80 +206,65 @@ async fn is_time_to_pay_fee_v2(last_time_fee: Option<String>, interval_in_days: 
     Utc::now().timestamp() - last_day_payment.timestamp() >= (interval_in_days * 86000)
 }
 
-pub async fn fee_payer_v2(
+async fn make_fee_transfer(
     database_engine: Arc<DatabaseEngine>,
     interval_in_days: u8,
-    glitch_node: String,
-    scanner_name: String,
-    glitch_pk: String,
-    fee_address: String,
+    scanner_name: &str,
+    api: &Api<sr25519::Pair, WsRpcClient, BaseExtrinsicParams<PlainTip>>,
+    signer_account_id: &AccountId,
+    fee_address: &str,
 ) {
-    let mut interval = tokio::time::interval(Duration::from_secs(60));
-    let signer: sr25519::Pair = Pair::from_string(glitch_pk.as_str(), None).unwrap();
-    let signer_account_id = AccountId::from(signer.public());
-    let client = WsRpcClient::new(&glitch_node); // Before "ws://13.212.108.116:9944"
-    let api = Api::<_, _, PlainTipExtrinsicParams>::new(client)
-        .map(|api| api.set_signer(signer))
-        .unwrap();
-    loop {
-        tokio::select! {
-            _ = interval.tick() => {
-                let fee_last_time = database_engine.get_fee_last_time().await;
-                info!("Fee last time: {:?}", fee_last_time);
-                if is_time_to_pay_fee_v2(fee_last_time, interval_in_days as i64).await {
-                    let fee_to_send = database_engine.get_fee_counter(scanner_name.as_str()).await;
+    let fee_last_time = database_engine.get_fee_last_time().await;
+    info!("Fee last time: {:?}", fee_last_time);
+    if !is_time_to_pay_fee_v2(fee_last_time, interval_in_days as i64).await {
+        return;
+    }
+    let fee_to_send = database_engine.get_fee_counter(scanner_name).await;
+    if fee_to_send == 0 {
+        return;
+    }
 
-                    if fee_to_send != 0 {
-                        info!("It's time to pay business fee!");
-                        info!("Executing transfer of {} as business fee.", fee_to_send);
+    info!("It's time to pay business fee!");
+    info!("Executing transfer of {} as business fee.", fee_to_send);
 
-                        let signer_free_balance = match api.get_account_data(&signer_account_id).unwrap() {
-                            Some(data) => {
-                                warn!("Signer balance is: {:?}", data);
-                                data.free
-                            },
-                            None => 0_u128,
-                        };
+    let signer_free_balance = match api.get_account_data(&signer_account_id).unwrap() {
+        Some(data) => {
+            warn!("Signer balance is: {:?}", data);
+            data.free
+        }
+        None => 0_u128,
+    };
 
-                        if fee_to_send > signer_free_balance {
-                            warn!("There are not enough funds to send the business fee.");
-                            continue;
-                        }
+    if fee_to_send > signer_free_balance {
+        warn!("There are not enough funds to send the business fee.");
+        return;
+    }
 
-                        let account_id = AccountId::from(Public::from_str(fee_address.as_str()).unwrap());
+    let account_id = AccountId::from(Public::from_str(fee_address).unwrap());
 
-                        let xt = api.balance_transfer(GenericAddress::Id(account_id), fee_to_send);
+    let xt = api.balance_transfer(GenericAddress::Id(account_id), fee_to_send);
 
-                        let xt_result = match api.send_extrinsic(xt.hex_encode(), XtStatus::Finalized) {
-                            Ok(r) => r,
-                            Err(e) => {
-                                error!("Transfer error: {:?}", e);
-                                None
-                            }
-                        };
+    let xt_result = match api.send_extrinsic(xt.hex_encode(), XtStatus::Finalized) {
+        Ok(r) => r,
+        Err(e) => {
+            error!("Transfer error: {:?}", e);
+            None
+        }
+    };
 
-                        match xt_result {
-                            Some(hash) => {
-                                database_engine
-                                    .modify_fee_counter(0, scanner_name.as_str())
-                                    .await;
-                                database_engine
-                                    .insert_tx_fee(format!("{:#x}", hash), fee_to_send.to_string())
-                                    .await;
-                                info!(
-                                    "The transfer of the business fee ({}) has been completed",
-                                    fee_to_send
-                                );
-                            }
-                            None => {
-                                info!(
-                                    "Transfer of the business fee not completed. It will be tried again."
-                                );
-                            }
-                        }
-                    }
-                }
-            }
+    match xt_result {
+        Some(hash) => {
+            database_engine.modify_fee_counter(0, scanner_name).await;
+            database_engine
+                .insert_tx_fee(format!("{:#x}", hash), fee_to_send.to_string())
+                .await;
+            info!(
+                "The transfer of the business fee ({}) has been completed",
+                fee_to_send
+            );
+        }
+        None => {
+            info!("Transfer of the business fee not completed. It will be tried again.");
         }
     }
 }
