@@ -1,6 +1,6 @@
-use log::{debug, error};
+use log::{debug, error, info};
 use mysql_async::prelude::{BatchQuery, Queryable, WithParams};
-use mysql_async::{params, Conn, Pool, Row, TxOpts};
+use mysql_async::{params, Conn, Pool, Row, TxOpts, Params};
 use sp_core::U256;
 use web3::types::{Log, H160, H256};
 
@@ -23,6 +23,7 @@ const UPDATE_TX_GLITCH: &str = r"UPDATE tx SET tx_glitch_hash = :glitch_tx_hash,
 const INSERT_TXS: &str = r"INSERT INTO tx (tx_eth_hash, from_eth_address, amount, to_glitch_address) VALUES (:tx_eth_hash, :from_eth_address, :amount, :to_glitch_address)";
 const SAVE_ERROR: &str = r"UPDATE tx SET error = :error WHERE id = :id";
 const GET_LAST_FEE_TIME: &str = r"SELECT time FROM fee_transaction ft ORDER BY time DESC LIMIT 1";
+const UPDATE_TX_WITH_TRANSACTION_FEE_ID: &str = r"UPDATE tx t SET t.wich_transaction_fee = :transaction_fee_id WHERE t.wich_transaction_fee is NULL  AND t.state = 'PROCESSED';";
 
 #[derive(Clone)]
 pub struct ScannerState {
@@ -289,8 +290,18 @@ impl DatabaseEngine {
         let result = INSERT_TX_FEE.with(vec![params]).batch(&mut conn).await;
 
         match result {
-            Ok(_) => debug!("New tx fee created!"),
-            Err(e) => panic!("Fee tx could not be created in the database.: {e}"),
+            Ok(_) => {
+                debug!("New tx fee created!");
+                let last_id: u64 = conn.exec_first("SELECT LAST_INSERT_ID()", Params::Empty).await.unwrap().unwrap();
+
+                let result = conn.exec_drop(UPDATE_TX_WITH_TRANSACTION_FEE_ID, params!{"transaction_fee_id" => last_id}).await;
+
+                match result {
+                    Ok(_) => info!("Tx updated with transaction fee id!"),
+                    Err(e) => error!("Error when updating the transaction fee id of the tx {e}")
+                }
+            },
+            Err(e) => error!("Fee tx could not be created in the database.: {e}"),
         }
     }
 

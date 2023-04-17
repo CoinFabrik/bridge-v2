@@ -1,4 +1,4 @@
-use chrono::{NaiveDateTime, Utc};
+use chrono::{Days, NaiveDateTime, Utc};
 use log::{error, info, warn};
 use sp_core::{crypto::Pair, sr25519, sr25519::Public, U256};
 use std::{str::FromStr, sync::Arc};
@@ -200,7 +200,13 @@ pub async fn fee_payer_v2(
 async fn is_time_to_pay_fee_v2(last_time_fee: Option<String>, interval_in_days: i64) -> bool {
     let last_day_payment = match last_time_fee {
         Some(time) => NaiveDateTime::parse_from_str(&time, "%Y-%m-%d %H:%M:%S").unwrap(),
-        None => NaiveDateTime::from_timestamp_millis(Utc::now().timestamp()).unwrap(),
+        None => NaiveDateTime::from_timestamp_millis(
+            Utc::now()
+                .checked_sub_days(Days::new(2))
+                .unwrap()
+                .timestamp(),
+        )
+        .unwrap(),
     };
 
     Utc::now().timestamp() - last_day_payment.timestamp() >= (interval_in_days * 86000)
