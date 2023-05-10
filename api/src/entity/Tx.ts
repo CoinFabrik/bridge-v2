@@ -25,4 +25,10 @@ export class Tx {
 
   @Column("varchar", { length: 255, nullable: true })
   business_fee_percentage: string;
+
+  @Column("varchar", { length: 66, nullable: true })
+  extrinsic_hash?: string;
+
+  @Column("varchar", { length: 255, nullable: true })
+  net_amount?: string | undefined;
 }
