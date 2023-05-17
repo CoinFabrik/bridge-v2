@@ -15,13 +15,15 @@ createConnection().then(async (connection) => {
   const wsProvider = new WsProvider(process.env.WS_NODE);
   const api = await ApiPromise.create({ provider: wsProvider });
 
-  app.get("/api/transactionInfo/:txId", async (request, response) => {
+  app.get("/api/transactionInfo/:eth_tx", async (request, response) => {
     console.info(
-      `[${new Date().toLocaleString()}] - Getting information from transaction with id ${
-        request.params.txId
+      `[${new Date().toLocaleString()}] - Getting information from eth transaction with id ${
+        request.params.eth_tx
       }`
     );
-    const tx = await txRepository.findOne(request.params.txId);
+    const tx = await txRepository.findOne({
+      tx_eth_hash: request.params.eth_tx,
+    });
 
     if (tx.extrinsic_hash && tx.net_amount) {
       console.info(
@@ -34,9 +36,9 @@ createConnection().then(async (connection) => {
     }
 
     if (!tx) {
-      return response
-        .status(400)
-        .json({ error: `No transaction found with id ${request.params.txId}` });
+      return response.status(400).json({
+        error: `No transaction found with id ${request.params.eth_tx}`,
+      });
     }
 
     let signedBlock: SignedBlock;
