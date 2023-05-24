@@ -15,7 +15,7 @@ createConnection().then(async (connection) => {
   const wsProvider = new WsProvider(process.env.WS_NODE);
   const api = await ApiPromise.create({ provider: wsProvider });
 
-  const getGlitchInfo = async (glitchHash: string) => {
+  const getGlitchInfo = async (glitchHash: string, toGlitchAddress: string) => {
     let signedBlock: SignedBlock;
     try {
       console.log(
@@ -46,9 +46,15 @@ createConnection().then(async (connection) => {
           .join(", ")})`
       );
 
-      const x = args.map((a) => a.toString());
-      netAmount = x.at(1);
-      extrinsicHash = ex.hash.toHex();
+      if (
+        section === "balances" &&
+        method === "transfer" &&
+        args[0].toString() === toGlitchAddress
+      ) {
+        const x = args.map((a) => a.toString());
+        netAmount = x.at(1);
+        extrinsicHash = ex.hash.toHex();
+      }
 
       // signer/nonce info
       if (isSigned) {
@@ -86,7 +92,7 @@ createConnection().then(async (connection) => {
           } already exists in the database.`
         );
       } else {
-        getGlitchInfo(tx.tx_glitch_hash)
+        getGlitchInfo(tx.tx_glitch_hash, tx.to_glitch_address)
           .then(async (glitchInfo) => {
             tx.extrinsic_hash = glitchInfo.extrinsicHash;
             tx.net_amount = glitchInfo.netAmount;
