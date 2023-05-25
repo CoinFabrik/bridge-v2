@@ -14,7 +14,7 @@ async fn calculate_amount_to_transfer_and_business_fee_v2(
     api: &Api<sr25519::Pair, WsRpcClient, BaseExtrinsicParams<PlainTip>>,
     glitch_gas: bool,
     amount: u128,
-    business_fee: u128,
+    business_fee: f64,
     public: Public,
 ) -> (u128, u128) {
     let xt_to_send = api
@@ -30,8 +30,7 @@ async fn calculate_amount_to_transfer_and_business_fee_v2(
     };
 
     let amount_to_transfer = amount - fee;
-    let business_fee_amount =
-        (U256::from(amount_to_transfer) * U256::from(business_fee) / 100).as_u128();
+    let business_fee_amount = ((amount_to_transfer as f64 * business_fee) / 100.0) as u128;
 
     info!("Business fee amount is: {}", business_fee_amount);
 
@@ -55,7 +54,7 @@ pub async fn make_transfer(
     amount_to_transfer: u128,
     amount_business_fee: u128,
     database_engine: Arc<DatabaseEngine>,
-    business_fee_percentage: u128,
+    business_fee_percentage: f64,
 ) {
     let client = WsRpcClient::new(node);
     let signer: sr25519::Pair = Pair::from_string(&glitch_pk, None).unwrap();
@@ -82,7 +81,7 @@ pub async fn make_transfer(
                     tx_ix,
                     format!("{:#x}", hash),
                     amount_business_fee,
-                    business_fee_percentage,
+                    business_fee_percentage.to_string(),
                 )
                 .await;
             database_engine
@@ -101,7 +100,7 @@ pub async fn run_network_listener(
     name: String,
     glitch_pk: String,
     glitch_node: String,
-    business_fee: u128,
+    business_fee: f64,
     glitch_gas: bool,
     database_engine: Arc<DatabaseEngine>,
 ) {
