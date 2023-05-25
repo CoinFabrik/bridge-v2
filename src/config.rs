@@ -9,7 +9,7 @@ pub struct Config {
     pub glitch_private_key: Option<String>,
     pub glitch_fee_address: String,
     pub interval_days_for_transfer: u8,
-    pub business_fee: u128,
+    pub business_fee: f64,
     pub glitch_gas: bool,
     pub db: Database,
     pub networks: Vec<Network>,

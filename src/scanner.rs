@@ -12,7 +12,7 @@ pub struct ScannerV2 {
     glitch_private_key: String,
     glitch_fee_address: String,
     interval_days_for_transfer: u8,
-    business_fee: u128,
+    business_fee: f64,
     glitch_gas: bool,
 }
 

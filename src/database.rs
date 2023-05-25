@@ -151,7 +151,7 @@ impl DatabaseEngine {
         id: u128,
         glitch_hash: String,
         business_fee_amount: u128,
-        business_fee_percentage: u128,
+        business_fee_percentage: String,
     ) {
         let mut conn = self.establish_connection().await;
         let params = params! {
