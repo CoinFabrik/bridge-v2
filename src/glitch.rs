@@ -1,6 +1,6 @@
 use chrono::{Days, NaiveDateTime, Utc};
 use log::{error, info, warn};
-use sp_core::{crypto::Pair, sr25519, sr25519::Public, U256};
+use sp_core::{crypto::Pair, sr25519, sr25519::Public};
 use std::{str::FromStr, sync::Arc};
 use substrate_api_client::{
     rpc::WsRpcClient, AccountId, Api, BaseExtrinsicParams, GenericAddress, MultiAddress, PlainTip,
@@ -196,7 +196,7 @@ pub async fn fee_payer_v2(
     }
 }
 
-async fn is_time_to_pay_fee_v2(last_time_fee: Option<String>, interval_in_days: i64) -> bool {
+async fn is_time_to_pay_fee_v2(last_time_fee: Option<String>, interval_in_secs: i64) -> bool {
     let last_day_payment = match last_time_fee {
         Some(time) => NaiveDateTime::parse_from_str(&time, "%Y-%m-%d %H:%M:%S").unwrap(),
         None => NaiveDateTime::from_timestamp_millis(
@@ -208,12 +208,12 @@ async fn is_time_to_pay_fee_v2(last_time_fee: Option<String>, interval_in_days: 
         .unwrap(),
     };
 
-    Utc::now().timestamp() - last_day_payment.timestamp() >= interval_in_days
+    Utc::now().timestamp() - last_day_payment.timestamp() >= interval_in_secs
 }
 
 async fn make_fee_transfer(
     database_engine: Arc<DatabaseEngine>,
-    interval_in_days: u32,
+    interval_in_secs: u32,
     scanner_name: &str,
     api: &Api<sr25519::Pair, WsRpcClient, BaseExtrinsicParams<PlainTip>>,
     signer_account_id: &AccountId,
@@ -221,7 +221,7 @@ async fn make_fee_transfer(
 ) {
     let fee_last_time = database_engine.get_fee_last_time().await;
     info!("Fee last time: {:?}", fee_last_time);
-    if !is_time_to_pay_fee_v2(fee_last_time, interval_in_days as i64).await {
+    if !is_time_to_pay_fee_v2(fee_last_time, interval_in_secs as i64).await {
         return;
     }
     let fee_to_send = database_engine.get_fee_counter(scanner_name).await;
