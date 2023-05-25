@@ -168,7 +168,7 @@ pub async fn run_network_listener(
 
 pub async fn fee_payer_v2(
     database_engine: Arc<DatabaseEngine>,
-    interval_in_days: u8,
+    interval_in_days: u32,
     glitch_node: String,
     scanner_name: String,
     glitch_pk: String,
@@ -208,12 +208,12 @@ async fn is_time_to_pay_fee_v2(last_time_fee: Option<String>, interval_in_days: 
         .unwrap(),
     };
 
-    Utc::now().timestamp() - last_day_payment.timestamp() >= (interval_in_days * 86000)
+    Utc::now().timestamp() - last_day_payment.timestamp() >= interval_in_days
 }
 
 async fn make_fee_transfer(
     database_engine: Arc<DatabaseEngine>,
-    interval_in_days: u8,
+    interval_in_days: u32,
     scanner_name: &str,
     api: &Api<sr25519::Pair, WsRpcClient, BaseExtrinsicParams<PlainTip>>,
     signer_account_id: &AccountId,

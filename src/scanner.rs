@@ -11,7 +11,7 @@ pub struct ScannerV2 {
     networks: Vec<Network>,
     glitch_private_key: String,
     glitch_fee_address: String,
-    interval_days_for_transfer: u8,
+    interval_days_for_transfer: u32,
     business_fee: f64,
     glitch_gas: bool,
 }
