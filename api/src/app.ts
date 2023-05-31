@@ -73,16 +73,19 @@ createConnection().then(async (connection) => {
       }`
     );
 
-    const page = request.query.page || 0;
-    const limit = request.query.limit || 10;
+    const page = (request.query.page || 0) as number;
+    const limit = (request.query.limit || 10) as number;
+
+    console.log(`Page is ${page}`);
+    console.log(`Limit is ${limit}`);
 
     console.info(
       `[${new Date().toLocaleString()}] - Searching ${limit} transaction on page ${page}.`
     );
 
     const txs = await txRepository.find({
-      take: limit as number,
-      skip: page as number,
+      take: limit,
+      skip: limit * page,
       where: [
         { from_eth_address: request.params.wallet },
         { to_glitch_address: request.params.wallet },
