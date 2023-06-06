@@ -17,17 +17,23 @@ createConnection().then(async (connection) => {
 
   const getGlitchInfo = async (glitchHash: string, toGlitchAddress: string) => {
     let signedBlock: SignedBlock;
+    let allRecords;
     try {
       console.log(
         `[${new Date().toLocaleString()}] - Asking the node for block information: ${glitchHash}`
       );
       signedBlock = await api.rpc.chain.getBlock(glitchHash);
+
+      const apiAt = await api.at(signedBlock.block.header.hash);
+      allRecords = await apiAt.query.system.events();
     } catch (error) {
       console.error(`[${new Date().toLocaleString()}] - ${error}`);
     }
 
     let netAmount: string;
     let extrinsicHash: string;
+    let glitchFee: string;
+    let timestamp: string;
 
     signedBlock.block.extrinsics.forEach((ex, index) => {
       // the extrinsics are decoded by the API, human-like view
@@ -35,9 +41,23 @@ createConnection().then(async (connection) => {
 
       const {
         isSigned,
-        meta,
         method: { args, method, section },
       } = ex;
+
+      const extrinsicSuccessEvent = JSON.parse(
+        allRecords
+          .filter(
+            ({ phase }) =>
+              phase.isApplyExtrinsic && phase.asApplyExtrinsic.eq(index)
+          )
+          .filter(
+            ({ event }) =>
+              event.section === "system" && event.method === "ExtrinsicSuccess"
+          )
+          .map(({ event }) => event.data.toString())[0]
+      );
+
+      glitchFee = extrinsicSuccessEvent[0].weight;
 
       // explicit display of name, args & documentation
       console.info(
@@ -45,6 +65,10 @@ createConnection().then(async (connection) => {
           .map((a) => a.toString())
           .join(", ")})`
       );
+
+      if (section === "timestamp" && method === "set") {
+        timestamp = args[0].toString();
+      }
 
       if (
         section === "balances" &&
@@ -63,7 +87,7 @@ createConnection().then(async (connection) => {
         );
       }
     });
-    return { netAmount, extrinsicHash };
+    return { netAmount, extrinsicHash, glitchFee, timestamp };
   };
 
   app.get("/api/transactionHistory/:wallet", async (request, response) => {
@@ -75,9 +99,6 @@ createConnection().then(async (connection) => {
 
     const page = (request.query.page || 0) as number;
     const limit = (request.query.limit || 10) as number;
-
-    console.log(`Page is ${page}`);
-    console.log(`Limit is ${limit}`);
 
     console.info(
       `[${new Date().toLocaleString()}] - Searching ${limit} transaction on page ${page}.`
@@ -97,31 +118,32 @@ createConnection().then(async (connection) => {
     );
 
     const txsWithInfo = txs.map(async (tx) => {
-      if (tx.extrinsic_hash && tx.net_amount) {
-        console.info(
-          `[${new Date().toLocaleString()}] - Net amount and extrinsic hash of transaction ${
-            tx.id
-          } already exists in the database.`
+      try {
+        const glitchInfo = await getGlitchInfo(
+          tx.tx_glitch_hash,
+          tx.to_glitch_address
         );
-      } else {
-        getGlitchInfo(tx.tx_glitch_hash, tx.to_glitch_address)
-          .then(async (glitchInfo) => {
-            tx.extrinsic_hash = glitchInfo.extrinsicHash;
-            tx.net_amount = glitchInfo.netAmount;
-            await txRepository.save(tx);
-          })
-          .catch((error) => {
-            console.error(
-              `[${new Date().toLocaleString()}] - Net amount and extrinsic hash of transaction ${
-                tx.id
-              } already exists in the database.`
-            );
-            console.error(error);
-            return tx;
-          });
-      }
 
-      return tx;
+        if (!tx.extrinsic_hash && !tx.net_amount) {
+          tx.extrinsic_hash = glitchInfo.extrinsicHash;
+          tx.net_amount = glitchInfo.netAmount;
+          await txRepository.save(tx);
+        }
+
+        return {
+          ...tx,
+          glitch_fee: glitchInfo.glitchFee,
+          glitch_timestamp: glitchInfo.timestamp,
+        };
+      } catch (error) {
+        console.error(
+          `[${new Date().toLocaleString()}] - No information could be obtained from the node for this transaction.: ${
+            tx.id
+          }`
+        );
+        console.error(error);
+        return tx;
+      }
     });
 
     return response.json(await Promise.all(txsWithInfo));
@@ -194,6 +216,7 @@ createConnection().then(async (connection) => {
 
       // signer/nonce info
       if (isSigned) {
+        console.info(meta);
         console.info(
           `[${new Date().toLocaleString()}] - signer=${ex.signer.toString()}, nonce=${ex.nonce.toString()}`
         );
