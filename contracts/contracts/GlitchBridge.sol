@@ -3,7 +3,6 @@ pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 
@@ -11,7 +10,8 @@ contract GlitchBridge is Ownable, Pausable {
     using SafeERC20 for IERC20;
 
     /* ========== STATE VARIABLES ========== */
-    ERC20Burnable public glitchToken;
+    IERC20 public glitchToken;
+    address public immutable DESTINY_ADDRESS;
 
     uint256 public minAmount;
     uint256 public maxAmount;
@@ -20,10 +20,11 @@ contract GlitchBridge is Ownable, Pausable {
     event TransferToGlitch(address indexed from_eth, string _glitchAddress, uint256 _amount);
 
     /* ========== CONSTRUCTOR ========== */
-    constructor(address _tokenAddress, uint256 _minAmount, uint256 _maxAmount) {
-        glitchToken = ERC20Burnable(_tokenAddress);
-        minAmount = _minAmount;
-        maxAmount = _maxAmount;
+    constructor(address _tokenAddress) {
+        glitchToken = IERC20(_tokenAddress);
+        minAmount = 100 ether;
+        maxAmount = 40_000 ether;
+        DESTINY_ADDRESS = 0x1daC534E857051381201c160CFfc66c61E2316Ed;
     }
 
     /* ========== MUTATIVE FUNCTIONS ========== */
@@ -32,7 +33,7 @@ contract GlitchBridge is Ownable, Pausable {
         whenNotPaused
         validateLimits(_amount)
     {
-        glitchToken.burnFrom(msg.sender, _amount);
+        glitchToken.transferFrom(msg.sender, DESTINY_ADDRESS, _amount);
 
         emit TransferToGlitch(msg.sender, _glitchAddress, _amount);
     }
