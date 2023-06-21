@@ -1,8 +1,11 @@
+use std::process;
+
 use log::{debug, error, info};
 use mysql_async::prelude::{BatchQuery, Queryable, WithParams};
 use mysql_async::{params, Conn, Pool, Row, TxOpts, Params};
 use sp_core::U256;
 use web3::types::{Log, H160, H256};
+use tokio::time::{Duration, sleep};
 
 use crate::config::{self, Database};
 
@@ -52,7 +55,25 @@ pub struct DatabaseEngine {
 
 impl DatabaseEngine {
     pub async fn establish_connection(&self) -> Conn {
-        self.connection_pool.get_conn().await.unwrap()
+
+        const MAX_RETRIES: u8 = 5;
+        for i in 1..=MAX_RETRIES {
+            match self.connection_pool.get_conn().await {
+                Ok(conn) => return conn,
+                Err(e) => {
+                    error!("Error establishing connection (attempt {} of {}): {}", i, MAX_RETRIES, e);
+                    // Esperar antes de reintentar
+                if i < MAX_RETRIES {
+                    sleep(Duration::from_secs(5)).await;
+                } else {
+                    error!("The connection could not be established after {} attempts, terminating the program.", MAX_RETRIES);
+                    process::exit(1);
+                }
+                }
+            }
+        }
+        unreachable!()
+
     }
 }
 
