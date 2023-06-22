@@ -90,6 +90,22 @@ createConnection().then(async (connection) => {
     return { netAmount, extrinsicHash, glitchFee, timestamp };
   };
 
+  app.get("/api/validators", async (request, response) => {
+    const currentEra = (await api.query.staking.currentEra()).toString();
+    const totalStakers = (
+      await api.query.staking.counterForValidators()
+    ).toString();
+    const totalStake = (
+      await api.query.staking.erasTotalStake(currentEra)
+    ).toString();
+
+    return response.json({
+      currentEra,
+      stakersCount: totalStakers,
+      totalStake,
+    });
+  });
+
   app.get("/api/transactionHistory/:wallet", async (request, response) => {
     console.info(
       `[${new Date().toLocaleString()}] - Obtaining the transaction history of address ${
