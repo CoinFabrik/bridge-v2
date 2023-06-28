@@ -112,7 +112,7 @@ pub async fn run_network_listener(
             .map(|api| api.set_signer(signer))
             .unwrap();
 
-    let mut interval = tokio::time::interval(Duration::from_millis(5000));
+    let interval = tokio::time::interval(Duration::from_millis(5000));
 
     loop {
         tokio::select! {

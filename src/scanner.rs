@@ -3,6 +3,7 @@ use crate::config::Network;
 use crate::database::DatabaseEngine;
 use crate::glitch::{fee_payer_v2, run_network_listener};
 use crate::Config;
+use crate::balance_monitor::monitor_balance;
 use log::info;
 use std::sync::Arc;
 
@@ -14,6 +15,7 @@ pub struct ScannerV2 {
     interval_days_for_transfer: u32,
     business_fee: f64,
     glitch_gas: bool,
+    config: Config,
 }
 
 impl ScannerV2 {
@@ -26,6 +28,7 @@ impl ScannerV2 {
             interval_days_for_transfer: config.interval_days_for_transfer,
             business_fee: config.business_fee,
             glitch_gas: config.glitch_gas,
+            config: config.clone(),
         }
     }
 
@@ -61,8 +64,17 @@ impl ScannerV2 {
                 self.glitch_private_key.clone(),
                 self.glitch_fee_address.clone(),
             ));
+
+            tokio::task::spawn(
+                monitor_balance(
+                    self.config.clone(),
+                )
+            );
+
         });
 
-        loop {}
+        loop {
+            tokio::time::sleep(1000).await;
+        }
     }
 }

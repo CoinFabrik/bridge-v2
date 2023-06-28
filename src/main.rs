@@ -1,4 +1,5 @@
 mod args;
+mod balance_monitor;
 mod block_listener;
 mod config;
 mod database;

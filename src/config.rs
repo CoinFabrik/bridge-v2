@@ -34,6 +34,13 @@ pub struct Network {
     pub confirmations: i32,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Notification {
+    pub low_balance: f64,
+    pub crit_balance: f64,
+}
+
+
 impl Config {
     pub fn new(args: Args) -> Self {
         let mut file = File::open(&args.config).expect("File not found!");
