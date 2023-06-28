@@ -62,7 +62,7 @@ impl ScannerV2 {
                 self.glitch_fee_address.clone(),
             ));
         });
-
+        // TODO: change because it consumes the entire cpu
         loop {}
     }
 }
