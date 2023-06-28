@@ -2,7 +2,7 @@ use std::process;
 
 use log::{debug, error, info};
 use mysql_async::prelude::{BatchQuery, Queryable, WithParams};
-use mysql_async::{params, Conn, Pool, Row, TxOpts, Params};
+use mysql_async::{params, Conn, Pool, Row, TxOpts, Params, OptsBuilder};
 use sp_core::U256;
 use web3::types::{Log, H160, H256};
 use tokio::time::{Duration, sleep};
@@ -50,51 +50,46 @@ pub struct DatabaseEngine {
     pub password: String,
     pub port: u32,
     pub database: String,
-    pub connection_pool: Pool,
 }
 
 impl DatabaseEngine {
     pub async fn establish_connection(&self) -> Conn {
-
         const MAX_RETRIES: u8 = 5;
         for i in 1..=MAX_RETRIES {
-            match self.connection_pool.get_conn().await {
+            let database_url = format!(
+                "mysql://{}:{}@{}:{}/{}",
+                self.user,
+                self.password,
+                self.host,
+                self.port,
+                self.database
+            );
+            let opts = OptsBuilder::from_opts(database_url.as_str());
+            match mysql_async::Conn::new(opts).await {
                 Ok(conn) => return conn,
                 Err(e) => {
                     error!("Error establishing connection (attempt {} of {}): {}", i, MAX_RETRIES, e);
-                    // Esperar antes de reintentar
-                if i < MAX_RETRIES {
-                    sleep(Duration::from_secs(5)).await;
-                } else {
-                    error!("The connection could not be established after {} attempts, terminating the program.", MAX_RETRIES);
-                    process::exit(1);
-                }
+                    if i < MAX_RETRIES {
+                        sleep(Duration::from_secs(5)).await;
+                    } else {
+                        error!("The connection could not be established after {} attempts, terminating the program.", MAX_RETRIES);
+                        process::exit(1);
+                    }
                 }
             }
         }
         unreachable!()
-
     }
 }
 
 impl DatabaseEngine {
     pub fn new(db_config: config::Database) -> Self {
-        let database_url = format!(
-            "mysql://{}:{}@{}:{}/{}",
-            db_config.username,
-            db_config.password,
-            db_config.host,
-            db_config.port,
-            db_config.database
-        );
-
         Self {
             host: db_config.host,
             user: db_config.username,
             password: db_config.password,
             port: db_config.port,
             database: db_config.database,
-            connection_pool: Pool::new(database_url.as_str()),
         }
     }
 
