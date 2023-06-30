@@ -1,6 +1,7 @@
 import { createConnection } from "typeorm";
 import * as express from "express";
 import * as bodyParser from "body-parser";
+import * as cors from "cors";
 import { ApiPromise, WsProvider } from "@polkadot/api";
 import { Tx } from "./entity/Tx";
 import { SignedBlock } from "@polkadot/types/interfaces";
@@ -11,6 +12,7 @@ createConnection().then(async (connection) => {
   const txRepository = connection.getRepository(Tx);
   const app = express();
   app.use(bodyParser.json());
+  app.use(cors());
 
   const wsProvider = new WsProvider(process.env.WS_NODE);
   const api = await ApiPromise.create({ provider: wsProvider });
@@ -108,8 +110,7 @@ createConnection().then(async (connection) => {
 
   app.get("/api/transactionHistory/:wallet", async (request, response) => {
     console.info(
-      `[${new Date().toLocaleString()}] - Obtaining the transaction history of address ${
-        request.params.wallet
+      `[${new Date().toLocaleString()}] - Obtaining the transaction history of address ${request.params.wallet
       }`
     );
 
@@ -153,8 +154,7 @@ createConnection().then(async (connection) => {
         };
       } catch (error) {
         console.error(
-          `[${new Date().toLocaleString()}] - No information could be obtained from the node for this transaction.: ${
-            tx.id
+          `[${new Date().toLocaleString()}] - No information could be obtained from the node for this transaction.: ${tx.id
           }`
         );
         console.error(error);
@@ -167,8 +167,7 @@ createConnection().then(async (connection) => {
 
   app.get("/api/transactionInfo/:eth_tx", async (request, response) => {
     console.info(
-      `[${new Date().toLocaleString()}] - Getting information from eth transaction with id ${
-        request.params.eth_tx
+      `[${new Date().toLocaleString()}] - Getting information from eth transaction with id ${request.params.eth_tx
       }`
     );
     const tx = await txRepository.findOne({
@@ -194,8 +193,7 @@ createConnection().then(async (connection) => {
     let signedBlock: SignedBlock;
     try {
       console.log(
-        `[${new Date().toLocaleString()}] - Asking the node for block information: ${
-          tx.tx_glitch_hash
+        `[${new Date().toLocaleString()}] - Asking the node for block information: ${tx.tx_glitch_hash
         }`
       );
       signedBlock = await api.rpc.chain.getBlock(tx.tx_glitch_hash);
