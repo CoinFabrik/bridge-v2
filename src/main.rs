@@ -39,7 +39,7 @@ async fn main() -> web3::Result<()> {
 
     let config: Config = Config::new(args).check_private_keys();
 
-    ScannerV2::new(config).run();
+    ScannerV2::run(config).await;
 
     Ok(())
 }

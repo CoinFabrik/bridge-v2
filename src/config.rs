@@ -1,6 +1,6 @@
-use crate::args::{request_private_keys, Args};
-use log::{error, info};
-use serde_derive::{Deserialize, Serialize};
+use crate::args::{ request_private_keys, Args };
+use log::{ error, info };
+use serde_derive::{ Deserialize, Serialize };
 use std::fs::File;
 use std::io::Read;
 
@@ -13,6 +13,7 @@ pub struct Config {
     pub glitch_gas: bool,
     pub db: Database,
     pub networks: Vec<Network>,
+    pub alert: Notification,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -36,10 +37,13 @@ pub struct Network {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Notification {
+    pub host: String,
+    pub user: String,
+    pub password: String,
+    pub send_to: Vec<String>,
     pub low_balance: f64,
     pub crit_balance: f64,
 }
-
 
 impl Config {
     pub fn new(args: Args) -> Self {
@@ -47,8 +51,7 @@ impl Config {
 
         let mut data = String::new();
 
-        file.read_to_string(&mut data)
-            .expect("Error while reading file!");
+        file.read_to_string(&mut data).expect("Error while reading file!");
 
         match serde_json::from_str(&data) {
             Ok(config) => config,
