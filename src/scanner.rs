@@ -1,6 +1,5 @@
 use crate::balance_monitor::monitor_balance;
 use crate::block_listener::listen_blocks_v2;
-use crate::config::Network;
 use crate::database::DatabaseEngine;
 use crate::glitch::{ fee_payer_v2, run_network_listener };
 use crate::Config;
@@ -8,29 +7,9 @@ use log::info;
 use std::sync::Arc;
 use tokio::time::{ sleep, Duration };
 
-pub struct ScannerV2 {
-    database_engine: Arc<DatabaseEngine>,
-    networks: Vec<Network>,
-    glitch_private_key: String,
-    glitch_fee_address: String,
-    interval_days_for_transfer: u32,
-    business_fee: f64,
-    glitch_gas: bool,
-}
+pub struct ScannerV2 {}
 
 impl ScannerV2 {
-    pub fn new(config: Config) -> Self {
-        Self {
-            database_engine: Arc::new(DatabaseEngine::new(config.db)),
-            networks: config.networks,
-            glitch_private_key: config.glitch_private_key.unwrap(),
-            glitch_fee_address: config.glitch_fee_address,
-            interval_days_for_transfer: config.interval_days_for_transfer,
-            business_fee: config.business_fee,
-            glitch_gas: config.glitch_gas,
-        }
-    }
-
     pub async fn run(config: Config) {
         info!("Scanner running...");
 
