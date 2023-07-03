@@ -6,6 +6,7 @@ import { ApiPromise, WsProvider } from "@polkadot/api";
 import { Tx } from "./entity/Tx";
 import { SignedBlock } from "@polkadot/types/interfaces";
 import * as dotenv from "dotenv";
+import { AnyJson } from "@polkadot/types/types";
 dotenv.config();
 
 createConnection().then(async (connection) => {
@@ -94,23 +95,26 @@ createConnection().then(async (connection) => {
 
   app.get("/api/validators", async (request, response) => {
     const currentEra = (await api.query.staking.currentEra()).toString();
-    const totalStakers = (
-      await api.query.staking.counterForValidators()
-    ).toString();
     const totalStake = (
       await api.query.staking.erasTotalStake(currentEra)
     ).toString();
 
+    const stakers = (await api.query.session.validators()).toHuman();
+    let stakersCount: number;
+    if (Array.isArray(stakers)) {
+      stakersCount = stakers.length;
+    }
     return response.json({
       currentEra,
-      stakersCount: totalStakers,
+      stakersCount,
       totalStake,
     });
   });
 
   app.get("/api/transactionHistory/:wallet", async (request, response) => {
     console.info(
-      `[${new Date().toLocaleString()}] - Obtaining the transaction history of address ${request.params.wallet
+      `[${new Date().toLocaleString()}] - Obtaining the transaction history of address ${
+        request.params.wallet
       }`
     );
 
@@ -154,7 +158,8 @@ createConnection().then(async (connection) => {
         };
       } catch (error) {
         console.error(
-          `[${new Date().toLocaleString()}] - No information could be obtained from the node for this transaction.: ${tx.id
+          `[${new Date().toLocaleString()}] - No information could be obtained from the node for this transaction.: ${
+            tx.id
           }`
         );
         console.error(error);
@@ -167,7 +172,8 @@ createConnection().then(async (connection) => {
 
   app.get("/api/transactionInfo/:eth_tx", async (request, response) => {
     console.info(
-      `[${new Date().toLocaleString()}] - Getting information from eth transaction with id ${request.params.eth_tx
+      `[${new Date().toLocaleString()}] - Getting information from eth transaction with id ${
+        request.params.eth_tx
       }`
     );
     const tx = await txRepository.findOne({
@@ -193,7 +199,8 @@ createConnection().then(async (connection) => {
     let signedBlock: SignedBlock;
     try {
       console.log(
-        `[${new Date().toLocaleString()}] - Asking the node for block information: ${tx.tx_glitch_hash
+        `[${new Date().toLocaleString()}] - Asking the node for block information: ${
+          tx.tx_glitch_hash
         }`
       );
       signedBlock = await api.rpc.chain.getBlock(tx.tx_glitch_hash);
