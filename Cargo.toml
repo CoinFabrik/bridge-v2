@@ -30,6 +30,7 @@ hex-literal = "0.3.4"
 hex = "0.4.3"
 base58 = "0.2.0"
 chrono = "0.4.0"
+lettre = "0.10.4"
 
 [dependencies.syn]
 version = "=1.0.107"
