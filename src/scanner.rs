@@ -50,7 +50,7 @@ impl ScannerV2 {
                 monitor_balance(
                     network_config.ws_glitch_node.clone(),
                     config.glitch_private_key.clone().unwrap(),
-                    config.alert.clone()
+                    config.notifications.clone()
                 )
             );
         });

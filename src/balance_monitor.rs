@@ -59,9 +59,9 @@ pub async fn monitor_balance(glitch_node: String, glitch_pk: String, smtp_config
                     None => 0_u128,
                 };
 
-                if signer_free_balance as f64 <= low_balance_in_wei {
-                    let now = Instant::now();
-                    if now.duration_since(last_email_sent) > email_delay {
+                let now = Instant::now();
+
+                if signer_free_balance as f64 <= low_balance_in_wei && now.duration_since(last_email_sent) > email_delay {
                         let mailer: SmtpTransport = SmtpTransport::relay(smtp_config.host.as_str())
                         .unwrap()
                         .credentials(creds.clone())
@@ -74,7 +74,6 @@ pub async fn monitor_balance(glitch_node: String, glitch_pk: String, smtp_config
                             },
                             Err(e) => info!("Could not send email: {e:?}"),
                         };
-                    }
                 }
                 
             }
