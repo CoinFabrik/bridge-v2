@@ -1,16 +1,19 @@
 import { createConnection } from "typeorm";
 import * as express from "express";
 import * as bodyParser from "body-parser";
+import * as cors from "cors";
 import { ApiPromise, WsProvider } from "@polkadot/api";
 import { Tx } from "./entity/Tx";
 import { SignedBlock } from "@polkadot/types/interfaces";
 import * as dotenv from "dotenv";
+import { AnyJson } from "@polkadot/types/types";
 dotenv.config();
 
 createConnection().then(async (connection) => {
   const txRepository = connection.getRepository(Tx);
   const app = express();
   app.use(bodyParser.json());
+  app.use(cors());
 
   const wsProvider = new WsProvider(process.env.WS_NODE);
   const api = await ApiPromise.create({ provider: wsProvider });
@@ -92,16 +95,18 @@ createConnection().then(async (connection) => {
 
   app.get("/api/validators", async (request, response) => {
     const currentEra = (await api.query.staking.currentEra()).toString();
-    const totalStakers = (
-      await api.query.staking.counterForValidators()
-    ).toString();
     const totalStake = (
       await api.query.staking.erasTotalStake(currentEra)
     ).toString();
 
+    const stakers = (await api.query.session.validators()).toHuman();
+    let stakersCount: number;
+    if (Array.isArray(stakers)) {
+      stakersCount = stakers.length;
+    }
     return response.json({
       currentEra,
-      stakersCount: totalStakers,
+      stakersCount,
       totalStake,
     });
   });
