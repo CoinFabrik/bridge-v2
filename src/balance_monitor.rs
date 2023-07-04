@@ -21,7 +21,7 @@ use tokio::time::Duration;
 
 use crate::config::Notification;
 
-pub fn build_email(emails_to: Vec<String>, low_balance: f64) -> Message {
+pub fn build_email(emails_to: Vec<String>, low_balance: f64, from: &str) -> Message {
     let mut email_builder = Message::builder();
 
     for email_to in emails_to {
@@ -30,7 +30,7 @@ pub fn build_email(emails_to: Vec<String>, low_balance: f64) -> Message {
     }
 
     email_builder
-        .from("NoBody <nobody@glitch.finance>".parse().unwrap())
+        .from(from.parse().unwrap())
         .subject("[Important] GLCH allocation is bridge now is low!")
         .header(ContentType::TEXT_PLAIN)
         .body(
@@ -59,7 +59,11 @@ pub fn check_balance_and_send_email(
         (signer_free_balance as f64) <= low_balance_in_wei &&
         now.duration_since(*last_email_sent) > *email_delay
     {
-        let email = build_email(smtp_config.send_to.clone(), smtp_config.low_balance);
+        let email = build_email(
+            smtp_config.send_to.clone(),
+            smtp_config.low_balance,
+            smtp_config.from.as_str()
+        );
 
         let mailer: SmtpTransport = SmtpTransport::relay(smtp_config.host.as_str())
             .unwrap()
@@ -87,7 +91,7 @@ pub async fn monitor_balance(glitch_node: String, glitch_pk: String, smtp_config
 
     let mut interval = tokio::time::interval(Duration::from_millis(5000));
     let mut last_email_sent = Instant::now();
-    let email_delay = Duration::from_secs(1800);
+    let email_delay = Duration::from_secs(60 * smtp_config.delay_in_minutes);
 
     let creds = Credentials::new(smtp_config.user.clone(), smtp_config.password.clone());
 

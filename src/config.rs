@@ -40,7 +40,9 @@ pub struct Notification {
     pub host: String,
     pub user: String,
     pub password: String,
+    pub from: String,
     pub send_to: Vec<String>,
+    pub delay_in_minutes: u64,
     pub low_balance: f64,
 }
 
