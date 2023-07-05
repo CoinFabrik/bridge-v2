@@ -6,7 +6,7 @@ import { ApiPromise, WsProvider } from "@polkadot/api";
 import { Tx } from "./entity/Tx";
 import { SignedBlock } from "@polkadot/types/interfaces";
 import * as dotenv from "dotenv";
-import { AnyJson } from "@polkadot/types/types";
+import { ethers } from "ethers";
 dotenv.config();
 
 createConnection().then(async (connection) => {
@@ -151,10 +151,17 @@ createConnection().then(async (connection) => {
           await txRepository.save(tx);
         }
 
+        const provider = new ethers.providers.JsonRpcProvider(
+          process.env.ETH_NODE
+        );
+        const eth_tx = await provider.getTransaction(tx.tx_eth_hash);
+        const block = await provider.getBlock(eth_tx.blockNumber);
+
         return {
           ...tx,
           glitch_fee: glitchInfo.glitchFee,
           glitch_timestamp: glitchInfo.timestamp,
+          eth_timestamp: block.timestamp,
         };
       } catch (error) {
         console.error(

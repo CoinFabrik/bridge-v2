@@ -25,6 +25,7 @@
     "reflect-metadata": "^0.1.13",
     "ts-node": "^10.9.1",
     "typeorm": "^0.2.41",
-    "typescript": "^5.0.4"
+    "typescript": "^5.0.4",
+    "ethers": "^5.7.2"
   }
 }
