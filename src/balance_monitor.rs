@@ -81,6 +81,7 @@ pub fn check_balance_and_send_email(
 }
 
 pub async fn monitor_balance(glitch_node: String, glitch_pk: String, smtp_config: Notification) {
+    info!("Balance monitoring system running now!");
     let client = WsRpcClient::new(&glitch_node);
     let signer: sr25519::Pair = Pair::from_string(&glitch_pk, None).unwrap();
     let signer_account_id = AccountId::from(signer.public());
