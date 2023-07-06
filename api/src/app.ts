@@ -6,7 +6,7 @@ import { ApiPromise, WsProvider } from "@polkadot/api";
 import { Tx } from "./entity/Tx";
 import { SignedBlock } from "@polkadot/types/interfaces";
 import * as dotenv from "dotenv";
-import { ethers } from "ethers";
+import { ethers, logger } from "ethers";
 dotenv.config();
 
 createConnection().then(async (connection) => {
@@ -139,17 +139,35 @@ createConnection().then(async (connection) => {
     );
 
     const txsWithInfo = txs.map(async (tx) => {
+      let response: any = { ...tx };
       try {
-        const glitchInfo = await getGlitchInfo(
-          tx.tx_glitch_hash,
-          tx.to_glitch_address
-        );
+        getGlitchInfo(tx.tx_glitch_hash, tx.to_glitch_address)
+          .then((result) => {
+            const glitchInfo = result;
 
-        if (!tx.extrinsic_hash && !tx.net_amount) {
-          tx.extrinsic_hash = glitchInfo.extrinsicHash;
-          tx.net_amount = glitchInfo.netAmount;
-          await txRepository.save(tx);
-        }
+            if (!tx.extrinsic_hash && !tx.net_amount) {
+              tx.extrinsic_hash = glitchInfo.extrinsicHash;
+              tx.net_amount = glitchInfo.netAmount;
+              txRepository.save(tx).then((result) => {
+                console.info(
+                  "Transaction updated with extrinsic_hash and net_amount!1"
+                );
+              });
+
+              response = {
+                ...response,
+                glitch_fee: glitchInfo.glitchFee,
+                glitch_timestamp: glitchInfo.timestamp,
+              };
+            }
+          })
+          .catch((error) => {
+            console.error(
+              `[${new Date().toLocaleString()}] - No information could be obtained from the node for this transaction.: ${
+                tx.id
+              }`
+            );
+          });
 
         const provider = new ethers.providers.JsonRpcProvider(
           process.env.ETH_NODE
@@ -157,12 +175,9 @@ createConnection().then(async (connection) => {
         const eth_tx = await provider.getTransaction(tx.tx_eth_hash);
         const block = await provider.getBlock(eth_tx.blockNumber);
 
-        return {
-          ...tx,
-          glitch_fee: glitchInfo.glitchFee,
-          glitch_timestamp: glitchInfo.timestamp,
-          eth_timestamp: block.timestamp,
-        };
+        response = { ...response, eth_timestamp: block.timestamp };
+
+        return response;
       } catch (error) {
         console.error(
           `[${new Date().toLocaleString()}] - No information could be obtained from the node for this transaction.: ${
