@@ -7,6 +7,7 @@ import { Tx } from "./entity/Tx";
 import { SignedBlock } from "@polkadot/types/interfaces";
 import * as dotenv from "dotenv";
 import { ethers, logger } from "ethers";
+import { getGlitchInfo } from "./glitch";
 dotenv.config();
 
 createConnection().then(async (connection) => {
@@ -17,81 +18,6 @@ createConnection().then(async (connection) => {
 
   const wsProvider = new WsProvider(process.env.WS_NODE);
   const api = await ApiPromise.create({ provider: wsProvider });
-
-  const getGlitchInfo = async (glitchHash: string, toGlitchAddress: string) => {
-    let signedBlock: SignedBlock;
-    let allRecords;
-    try {
-      console.log(
-        `[${new Date().toLocaleString()}] - Asking the node for block information: ${glitchHash}`
-      );
-      signedBlock = await api.rpc.chain.getBlock(glitchHash);
-
-      const apiAt = await api.at(signedBlock.block.header.hash);
-      allRecords = await apiAt.query.system.events();
-    } catch (error) {
-      console.error(`[${new Date().toLocaleString()}] - ${error}`);
-    }
-
-    let netAmount: string;
-    let extrinsicHash: string;
-    let glitchFee: string;
-    let timestamp: string;
-
-    signedBlock.block.extrinsics.forEach((ex, index) => {
-      // the extrinsics are decoded by the API, human-like view
-      //console.log(index, ex.toHuman());
-
-      const {
-        isSigned,
-        method: { args, method, section },
-      } = ex;
-
-      const extrinsicSuccessEvent = JSON.parse(
-        allRecords
-          .filter(
-            ({ phase }) =>
-              phase.isApplyExtrinsic && phase.asApplyExtrinsic.eq(index)
-          )
-          .filter(
-            ({ event }) =>
-              event.section === "system" && event.method === "ExtrinsicSuccess"
-          )
-          .map(({ event }) => event.data.toString())[0]
-      );
-
-      glitchFee = extrinsicSuccessEvent[0].weight;
-
-      // explicit display of name, args & documentation
-      console.info(
-        `[${new Date().toLocaleString()}] - ${section}.${method}(${args
-          .map((a) => a.toString())
-          .join(", ")})`
-      );
-
-      if (section === "timestamp" && method === "set") {
-        timestamp = args[0].toString();
-      }
-
-      if (
-        section === "balances" &&
-        method === "transfer" &&
-        args[0].toString() === toGlitchAddress
-      ) {
-        const x = args.map((a) => a.toString());
-        netAmount = x.at(1);
-        extrinsicHash = ex.hash.toHex();
-      }
-
-      // signer/nonce info
-      if (isSigned) {
-        console.info(
-          `[${new Date().toLocaleString()}] - signer=${ex.signer.toString()}, nonce=${ex.nonce.toString()}`
-        );
-      }
-    });
-    return { netAmount, extrinsicHash, glitchFee, timestamp };
-  };
 
   app.get("/api/validators", async (request, response) => {
     const currentEra = (await api.query.staking.currentEra()).toString();
@@ -141,34 +67,34 @@ createConnection().then(async (connection) => {
     const txsWithInfo = txs.map(async (tx) => {
       let response: any = { ...tx };
       try {
-        getGlitchInfo(tx.tx_glitch_hash, tx.to_glitch_address)
-          .then((result) => {
-            const glitchInfo = result;
+        const glitchInfo = await getGlitchInfo(tx);
 
-            if (!tx.extrinsic_hash && !tx.net_amount) {
-              tx.extrinsic_hash = glitchInfo.extrinsicHash;
-              tx.net_amount = glitchInfo.netAmount;
-              txRepository.save(tx).then((result) => {
-                console.info(
-                  "Transaction updated with extrinsic_hash and net_amount!1"
-                );
-              });
-
-              response = {
-                ...response,
-                glitch_fee: glitchInfo.glitchFee,
-                glitch_timestamp: glitchInfo.timestamp,
-              };
-            }
-          })
-          .catch((error) => {
-            console.error(
-              `[${new Date().toLocaleString()}] - No information could be obtained from the node for this transaction.: ${
-                tx.id
-              }`
+        if (!tx.extrinsic_hash && !tx.net_amount) {
+          tx.extrinsic_hash = glitchInfo.extrinsicHash;
+          tx.net_amount = glitchInfo.netAmount;
+          txRepository.save(tx).then((result) => {
+            console.info(
+              "Transaction updated with extrinsic_hash and net_amount!1"
             );
           });
+        }
 
+        response = {
+          ...response,
+          glitch_fee: glitchInfo.glitchFee,
+          glitch_timestamp: glitchInfo.timestamp,
+        };
+      } catch (error) {
+        console.error(
+          `[${new Date().toLocaleString()}] - No information could be obtained from the node for this transaction.: ${
+            tx.id
+          }`
+        );
+        console.error(`[${new Date().toLocaleString()}] - Error: ${error}`);
+        console.error(error);
+      }
+
+      try {
         const provider = new ethers.providers.JsonRpcProvider(
           process.env.ETH_NODE
         );
@@ -176,17 +102,16 @@ createConnection().then(async (connection) => {
         const block = await provider.getBlock(eth_tx.blockNumber);
 
         response = { ...response, eth_timestamp: block.timestamp };
-
-        return response;
       } catch (error) {
         console.error(
-          `[${new Date().toLocaleString()}] - No information could be obtained from the node for this transaction.: ${
-            tx.id
+          `[${new Date().toLocaleString()}] - No information could be obtained from the eth hash: ${
+            tx.tx_eth_hash
           }`
         );
-        console.error(error);
-        return tx;
+        console.error(`[${new Date().toLocaleString()}] - Error: ${error}`);
       }
+
+      return response;
     });
 
     return response.json(await Promise.all(txsWithInfo));
