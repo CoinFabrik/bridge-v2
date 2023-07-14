@@ -1,10 +1,8 @@
-import { ApiPromise, WsProvider } from "@polkadot/api";
+import { ApiPromise } from "@polkadot/api";
 import { SignedBlock } from "@polkadot/types/interfaces";
 import { Tx } from "./entity/Tx";
 
-export const getGlitchInfo = async (tx: Tx) => {
-  const wsProvider = new WsProvider(process.env.WS_NODE);
-  const api = await ApiPromise.create({ provider: wsProvider });
+export const getGlitchInfo = async (tx: Tx, api: ApiPromise) => {
   let signedBlock: SignedBlock;
   let allRecords;
   try {

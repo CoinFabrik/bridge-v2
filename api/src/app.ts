@@ -67,7 +67,7 @@ createConnection().then(async (connection) => {
     const txsWithInfo = txs.map(async (tx) => {
       let response: any = { ...tx };
       try {
-        const glitchInfo = await getGlitchInfo(tx);
+        const glitchInfo = await getGlitchInfo(tx, api);
 
         if (!tx.extrinsic_hash && !tx.net_amount) {
           tx.extrinsic_hash = glitchInfo.extrinsicHash;
