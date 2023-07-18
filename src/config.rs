@@ -42,6 +42,7 @@ pub struct Notification {
     pub password: String,
     pub from: String,
     pub send_to: Vec<String>,
+    pub slack_webhook: String,
     pub delay_in_minutes: u64,
     pub low_balance: f64,
 }

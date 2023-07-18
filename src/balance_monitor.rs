@@ -1,4 +1,4 @@
-use std::{ time::Instant };
+use std::time::Instant;
 
 use lettre::{
     message::header::ContentType,
@@ -8,6 +8,7 @@ use lettre::{
     Transport,
 };
 use log::info;
+use serde_json::json;
 use sp_core::{ crypto::Pair, sr25519 };
 use substrate_api_client::{
     rpc::WsRpcClient,
@@ -17,11 +18,12 @@ use substrate_api_client::{
     PlainTip,
     PlainTipExtrinsicParams,
 };
+use reqwest::Error;
 use tokio::time::Duration;
 
 use crate::config::Notification;
 
-pub fn build_email(emails_to: Vec<String>, low_balance: f64, from: &str) -> Message {
+pub fn build_email(emails_to: Vec<String>, message: &str, from: &str) -> Message {
     let mut email_builder = Message::builder();
 
     for email_to in emails_to {
@@ -33,13 +35,22 @@ pub fn build_email(emails_to: Vec<String>, low_balance: f64, from: &str) -> Mess
         .from(from.parse().unwrap())
         .subject("[Important] GLCH allocation is bridge now is low!")
         .header(ContentType::TEXT_PLAIN)
-        .body(
-            format!("[Important] GLCH allocation is bridge now is lower than {} GLCH, please quickly top it up to prevent any delays in user journey.", low_balance)
-        )
+        .body(message.to_string())
         .unwrap()
 }
 
-pub fn check_balance_and_send_email(
+pub async fn send_slack_notify(msg: &str, slack_webhook_url: &str) -> Result<(), Error> {
+    let client = reqwest::Client::new();
+    let body = json!({
+        "text": msg
+    });
+
+    client.post(slack_webhook_url).json(&body).send().await?;
+
+    Ok(())
+}
+
+pub async fn check_balance_and_notify(
     api: &Api<sr25519::Pair, WsRpcClient, BaseExtrinsicParams<PlainTip>>,
     signer_account_id: &AccountId,
     smtp_config: Notification,
@@ -59,11 +70,11 @@ pub fn check_balance_and_send_email(
         (signer_free_balance as f64) <= low_balance_in_wei &&
         now.duration_since(*last_email_sent) > *email_delay
     {
-        let email = build_email(
-            smtp_config.send_to.clone(),
-            smtp_config.low_balance,
-            smtp_config.from.as_str()
+        let message = format!(
+            "[Important] GLCH allocation is bridge now is lower than {} GLCH, please quickly top it up to prevent any delays in user journey.",
+            smtp_config.low_balance
         );
+        let email = build_email(smtp_config.send_to.clone(), &message, smtp_config.from.as_str());
 
         let mailer: SmtpTransport = SmtpTransport::relay(smtp_config.host.as_str())
             .unwrap()
@@ -76,7 +87,14 @@ pub fn check_balance_and_send_email(
                 *last_email_sent = now;
             }
             Err(e) => info!("Could not send email: {e:?}"),
-        };
+        }
+
+        match send_slack_notify(&message, &smtp_config.slack_webhook).await {
+            Ok(_) => {
+                info!("Slack notification sent successfully!");
+            }
+            Err(e) => info!("Could not send slack notification: {e:?}"),
+        }
     }
 }
 
@@ -100,7 +118,7 @@ pub async fn monitor_balance(glitch_node: String, glitch_pk: String, smtp_config
 
     loop {
         tokio::select! {
-            _ = interval.tick() => check_balance_and_send_email(&api, &signer_account_id, smtp_config.clone(), &creds, low_balance_in_wei, &mut last_email_sent, &email_delay)
+            _ = interval.tick() => check_balance_and_notify(&api, &signer_account_id, smtp_config.clone(), &creds, low_balance_in_wei, &mut last_email_sent, &email_delay).await
         }
     }
 }

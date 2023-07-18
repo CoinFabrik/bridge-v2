@@ -1543,6 +1543,7 @@ dependencies = [
  "log4rs",
  "mysql_async",
  "regex",
+ "reqwest",
  "serde",
  "serde_derive",
  "serde_json",
