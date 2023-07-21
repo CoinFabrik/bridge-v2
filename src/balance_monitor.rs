@@ -74,7 +74,7 @@ pub async fn check_balance_and_notify(
         let message = format!(
             "GLCH allocation in the new bridge now is lower than {} GLCH, please quickly top it up to prevent any delays in user journey. The current balance is {} GLCH. Timestamp: {}",
             smtp_config.low_balance,
-            signer_free_balance,
+            signer_free_balance / (10_u128).pow(18),
             Local::now().format("%T %d/%m/%Y [%:z]").to_string()
         );
         let email = build_email(
