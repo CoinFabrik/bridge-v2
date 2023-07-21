@@ -37,6 +37,7 @@ pub struct Network {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Notification {
+    pub env: String,
     pub host: String,
     pub user: String,
     pub password: String,

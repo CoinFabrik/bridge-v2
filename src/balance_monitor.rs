@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use chrono::Local;
 use lettre::{
     message::header::ContentType,
     transport::smtp::authentication::Credentials,
@@ -23,7 +24,7 @@ use tokio::time::Duration;
 
 use crate::config::Notification;
 
-pub fn build_email(emails_to: Vec<String>, message: &str, from: &str) -> Message {
+pub fn build_email(emails_to: Vec<String>, message: &str, from: &str, env: &str) -> Message {
     let mut email_builder = Message::builder();
 
     for email_to in emails_to {
@@ -33,16 +34,16 @@ pub fn build_email(emails_to: Vec<String>, message: &str, from: &str) -> Message
 
     email_builder
         .from(from.parse().unwrap())
-        .subject("[Important] GLCH allocation is bridge now is low!")
+        .subject(format!("[{}] GLCH allocation is bridge now is low!", env))
         .header(ContentType::TEXT_PLAIN)
         .body(message.to_string())
         .unwrap()
 }
 
-pub async fn send_slack_notify(msg: &str, slack_webhook_url: &str) -> Result<(), Error> {
+pub async fn send_slack_notify(msg: &str, slack_webhook_url: &str, env: &str) -> Result<(), Error> {
     let client = reqwest::Client::new();
     let body = json!({
-        "text": msg
+        "text": format!("[{}] {}", env, msg)
     });
 
     client.post(slack_webhook_url).json(&body).send().await?;
@@ -71,10 +72,17 @@ pub async fn check_balance_and_notify(
         now.duration_since(*last_email_sent) > *email_delay
     {
         let message = format!(
-            "[Important] GLCH allocation is bridge now is lower than {} GLCH, please quickly top it up to prevent any delays in user journey.",
-            smtp_config.low_balance
+            "GLCH allocation in the new bridge now is lower than {} GLCH, please quickly top it up to prevent any delays in user journey. The current balance is {} GLCH. Timestamp: {}",
+            smtp_config.low_balance,
+            signer_free_balance,
+            Local::now().format("%T %d/%m/%Y [%:z]").to_string()
         );
-        let email = build_email(smtp_config.send_to.clone(), &message, smtp_config.from.as_str());
+        let email = build_email(
+            smtp_config.send_to.clone(),
+            &message,
+            smtp_config.from.as_str(),
+            &smtp_config.env
+        );
 
         let mailer: SmtpTransport = SmtpTransport::relay(smtp_config.host.as_str())
             .unwrap()
@@ -89,7 +97,7 @@ pub async fn check_balance_and_notify(
             Err(e) => info!("Could not send email: {e:?}"),
         }
 
-        match send_slack_notify(&message, &smtp_config.slack_webhook).await {
+        match send_slack_notify(&message, &smtp_config.slack_webhook, &smtp_config.env).await {
             Ok(_) => {
                 info!("Slack notification sent successfully!");
             }
