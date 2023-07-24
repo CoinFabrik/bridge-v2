@@ -75,7 +75,7 @@ pub async fn check_balance_and_notify(
             "GLCH allocation in the new bridge now is lower than {} GLCH, please quickly top it up to prevent any delays in user journey. The current balance is {} GLCH. Timestamp: {}",
             smtp_config.low_balance,
             signer_free_balance / (10_u128).pow(18),
-            Local::now().format("%T %d/%m/%Y [%:z]").to_string()
+            get_current_timestamp_in_expected_format()
         );
         let email = build_email(
             smtp_config.send_to.clone(),
@@ -129,4 +129,15 @@ pub async fn monitor_balance(glitch_node: String, glitch_pk: String, smtp_config
             _ = interval.tick() => check_balance_and_notify(&api, &signer_account_id, smtp_config.clone(), &creds, low_balance_in_wei, &mut last_email_sent, &email_delay).await
         }
     }
+}
+
+fn get_current_timestamp_in_expected_format() -> String {
+    let now = Local::now();
+    let datetime_str = now.format("%T %d/%m/%Y").to_string();
+    let offset = now.offset().local_minus_utc();
+    let offset_hours = offset / 3600;
+
+    let timezone_str = format!("UTC{:+}", offset_hours);
+
+    format!("{} [{}]", datetime_str, timezone_str)
 }
