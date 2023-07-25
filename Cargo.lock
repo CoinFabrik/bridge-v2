@@ -1542,6 +1542,7 @@ dependencies = [
  "log",
  "log4rs",
  "mysql_async",
+ "num-format",
  "regex",
  "reqwest",
  "serde",

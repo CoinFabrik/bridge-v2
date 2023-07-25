@@ -21,6 +21,7 @@ use substrate_api_client::{
 };
 use reqwest::Error;
 use tokio::time::Duration;
+use num_format::{ Locale, ToFormattedString };
 
 use crate::config::Notification;
 
@@ -73,8 +74,8 @@ pub async fn check_balance_and_notify(
     {
         let message = format!(
             "GLCH allocation in the new bridge now is lower than {} GLCH, please quickly top it up to prevent any delays in user journey. The current balance is {} GLCH. Timestamp: {}",
-            smtp_config.low_balance,
-            signer_free_balance / (10_u128).pow(18),
+            (smtp_config.low_balance as i64).to_formatted_string(&Locale::en),
+            (signer_free_balance / (10_u128).pow(18)).to_formatted_string(&Locale::en),
             get_current_timestamp_in_expected_format()
         );
         let email = build_email(
