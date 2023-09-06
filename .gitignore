@@ -1,2 +1,4 @@
 /target/
 /feescript/node_modules
+./config.json
+./config2.json
