@@ -2,3 +2,4 @@
 /feescript/node_modules
 ./config.json
 ./config2.json
+./git-filter-repo
